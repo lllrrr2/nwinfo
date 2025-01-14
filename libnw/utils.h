@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Unlicense
 #pragma once
 
+#define VC_EXTRALEAN
 #include <windows.h>
 #include "format.h"
 #include "nt.h"
@@ -29,12 +30,12 @@ PVOID NWL_GetAcpi(DWORD TableId);
 PVOID NWL_GetAcpiByAddr(DWORD_PTR Addr);
 
 UINT8 NWL_AcpiChecksum(VOID* base, UINT size);
-VOID NWL_TrimString(CHAR* String);
 INT NWL_GetRegDwordValue(HKEY Key, LPCWSTR SubKey, LPCWSTR ValueName, DWORD* pValue);
 HANDLE NWL_GetDiskHandleById(BOOL Cdrom, BOOL Write, DWORD Id);
 LPCSTR NWL_GetBusTypeString(STORAGE_BUS_TYPE Type);
 LPCSTR NWL_GuidToStr(UCHAR Guid[16]);
 LPCSTR NWL_WinGuidToStr(BOOL bBracket, GUID* pGuid);
+BOOL NWL_StrToGuid(const CHAR* cchText, GUID* pGuid);
 HMONITOR NWL_GetMonitorFromName(LPCWSTR lpDevice);
 LPCSTR NWL_UnixTimeToStr(INT nix);
 LPCSTR NWL_Ucs2ToUtf8(LPCWSTR src);

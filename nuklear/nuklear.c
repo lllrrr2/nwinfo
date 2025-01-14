@@ -10,6 +10,7 @@
 #pragma warning(disable:4244)
 
 #include <assert.h>
+#include <math.h>
 #define NK_ASSERT(expr) assert(expr)
 
 #define NK_MEMSET memset
@@ -142,7 +143,7 @@ nk_hover_colored(struct nk_context* ctx, const char* text, int text_len, struct 
 {
 	if (ctx->current == ctx->active // only show tooltip if the window is active
 		// make sure that no nonblocking popup is currently active
-		&& !(ctx->current->popup.win && (ctx->current->popup.type & NK_PANEL_SET_NONBLOCK)))
+		&& !(ctx->current->popup.win && ((int)ctx->current->popup.type & (int)NK_PANEL_SET_NONBLOCK)))
 	{
 		/* calculate size of the text and tooltip */
 		float text_width = ctx->style.font->width(ctx->style.font->userdata, ctx->style.font->height, text, text_len)

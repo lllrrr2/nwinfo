@@ -3,7 +3,7 @@
 #define VC_EXTRALEAN
 #include <windows.h>
 
-#define CDI_VERSION "9.2.1"
+#define CDI_VERSION "9.5.0"
 
 enum CDI_ATA_BOOL
 {
@@ -107,8 +107,7 @@ enum CDI_DISK_STATUS
 #define CDI_FLAG_ENABLE_INTEL_VROC		(1ULL << 23) // TRUE
 #define CDI_FLAG_ENABLE_ASM1352R		(1ULL << 24) // TRUE
 #define CDI_FLAG_ENABLE_AMD_RC2			(1ULL << 25) // FALSE
-//#define CDI_FLAG_ENABLE_JMS56X			(1ULL << 26) // FALSE
-//#define CDI_FLAG_ENABLE_JMB39X			(1ULL << 27) // FALSE
+#define CDI_FLAG_ENABLE_REALTEK_9220DP	(1ULL << 26) // FALSE
 
 #define CDI_FLAG_DEFAULT \
 	( \
@@ -132,13 +131,17 @@ enum CDI_DISK_STATUS
 		CDI_FLAG_ENABLE_ASM1352R \
 	)
 
-#ifdef __cplusplus
-
+#ifdef LIBCDI_IMPLEMENTATION
 typedef CAtaSmart CDI_SMART;
-
 #else
-
 typedef struct _CDI_SMART CDI_SMART;
+#endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+CONST CHAR*	WINAPI cdi_get_version(VOID);
 
 CDI_SMART*	WINAPI cdi_create_smart(VOID);
 VOID		WINAPI cdi_destroy_smart(CDI_SMART* ptr);
@@ -163,14 +166,16 @@ cdi_get_health_status(enum CDI_DISK_STATUS status)
 {
 	switch (status)
 	{
-	case CDI_DISK_STATUS_GOOD:
-		return "Good";
-	case CDI_DISK_STATUS_CAUTION:
-		return "Caution";
-	case CDI_DISK_STATUS_BAD:
-		return "Bad";
+		case CDI_DISK_STATUS_GOOD:
+			return "Good";
+		case CDI_DISK_STATUS_CAUTION:
+			return "Caution";
+		case CDI_DISK_STATUS_BAD:
+			return "Bad";
 	}
 	return "Unknown";
 }
 
+#ifdef __cplusplus
+}
 #endif

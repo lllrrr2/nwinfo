@@ -4,6 +4,8 @@
 #include <iphlpapi.h>
 #include <ws2tcpip.h>
 #include <netioapi.h>
+#include <wlanapi.h>
+#include <pdhmsg.h>
 
 #include "libnw.h"
 #include "utils.h"
@@ -17,32 +19,73 @@
 static const char* bps_human_sizes[6] =
 { "bps", "kbps", "Mbps", "Gbps", "Tbps", "Pbps", };
 
-static void DisplayAddress(PNODE pNode, const PSOCKET_ADDRESS pAddress, LPCSTR key)
+static UINT64 total_recv = 0, total_send = 0;
+
+VOID
+NWL_GetNetTraffic(NWLIB_NET_TRAFFIC* info, BOOL bit)
 {
+	const char* bit_units[6] = { "b", "kb", "Mb", "Gb", "Tb", "Pb", };
+	static UINT64 old_recv = 0;
+	static UINT64 old_send = 0;
+	UINT64 diff_recv = 0;
+	UINT64 diff_send = 0;
+	if (total_recv >= old_recv)
+		diff_recv = total_recv - old_recv;
+	if (total_send >= old_send)
+		diff_send = total_send - old_send;
+	old_recv = total_recv;
+	old_send = total_send;
+
+	if (NWLC->PdhNetRecv)
+		diff_recv = NWL_GetPdhSum(NWLC->PdhNetRecv, PDH_FMT_LARGE, NULL).largeValue;
+	if (NWLC->PdhNetSend)
+		diff_send = NWL_GetPdhSum(NWLC->PdhNetSend, PDH_FMT_LARGE, NULL).largeValue;
+	if (bit)
+	{
+		memcpy(info->StrRecv, NWL_GetHumanSize(diff_recv * 8, bit_units, 1000), NWL_STR_SIZE);
+		memcpy(info->StrSend, NWL_GetHumanSize(diff_send * 8, bit_units, 1000), NWL_STR_SIZE);
+	}
+	else
+	{
+		memcpy(info->StrRecv, NWL_GetHumanSize(diff_recv, NWLC->NwUnits, 1024), NWL_STR_SIZE);
+		memcpy(info->StrSend, NWL_GetHumanSize(diff_send, NWLC->NwUnits, 1024), NWL_STR_SIZE);
+	}
+}
+
+static const CHAR*
+IpAddrToStr(const PSOCKET_ADDRESS pAddress, PBOOL pbIpv6)
+{
+	static CHAR buf[INET6_ADDRSTRLEN] = { 0 };
 	if (!pAddress || !pAddress->lpSockaddr
 		|| pAddress->iSockaddrLength < sizeof(SOCKADDR_IN)
 		|| pAddress->iSockaddrLength > sizeof(SOCKADDR_IN6))
-	{
-		//printf("INVALID\n");
-	}
-	else if (pAddress->lpSockaddr->sa_family == AF_INET)
+		return NULL;
+	if (pAddress->lpSockaddr->sa_family == AF_INET && (NWLC->NetFlags & NW_NET_IPV4))
 	{
 		SOCKADDR_IN* si = (SOCKADDR_IN*)(pAddress->lpSockaddr);
-		char a[INET_ADDRSTRLEN] = { 0 };
-		if (inet_ntop(AF_INET, &(si->sin_addr), a, sizeof(a)))
-			NWL_NodeAttrSet(pNode, key ? key : "IPv4", a, NAFLG_FMT_IPADDR);
-		else
-			NWL_NodeAttrSet(pNode, key ? key : "IPv4", "", NAFLG_FMT_IPADDR);
+		*pbIpv6 = FALSE;
+		if (inet_ntop(AF_INET, &(si->sin_addr), buf, sizeof(buf)))
+			return buf;
 	}
-	else if (pAddress->lpSockaddr->sa_family == AF_INET6)
+	else if (pAddress->lpSockaddr->sa_family == AF_INET6 && (NWLC->NetFlags & NW_NET_IPV6))
 	{
 		SOCKADDR_IN6* si = (SOCKADDR_IN6*)(pAddress->lpSockaddr);
-		char a[INET6_ADDRSTRLEN] = { 0 };
-		if (inet_ntop(AF_INET6, &(si->sin6_addr), a, sizeof(a)))
-			NWL_NodeAttrSet(pNode, key ? key : "IPv6", a, NAFLG_FMT_IPADDR);
-		else
-			NWL_NodeAttrSet(pNode, key ? key : "IPv6", "", NAFLG_FMT_IPADDR);
+		*pbIpv6 = TRUE;
+		if (inet_ntop(AF_INET6, &(si->sin6_addr), buf, sizeof(buf)))
+			return buf;
 	}
+	return NULL;
+}
+
+static PNODE DisplayAddress(PNODE pParent, LPCSTR name, const PSOCKET_ADDRESS pAddress)
+{
+	BOOL bIpv6 = FALSE;
+	const CHAR* buf = IpAddrToStr(pAddress, &bIpv6);
+	if (buf == NULL)
+		return NULL;
+	PNODE pNode = NWL_NodeAppendNew(pParent, name, NFLG_TABLE_ROW);
+	NWL_NodeAttrSet(pNode, bIpv6 ? "IPv6" : "IPv4", buf, NAFLG_FMT_IPADDR);
+	return pNode;
 }
 
 static const CHAR*
@@ -63,6 +106,110 @@ IfTypeToStr(IFTYPE Type)
 	case IF_TYPE_WWANPP2: return "CDMA";
 	}
 	return "Other";
+}
+
+static const CHAR*
+WlanStateToStr(WLAN_INTERFACE_STATE state)
+{
+	switch (state)
+	{
+	case wlan_interface_state_not_ready: return "Not Ready";
+	case wlan_interface_state_connected: return "Connected";
+	case wlan_interface_state_ad_hoc_network_formed: return "AS Hoc Network Formed";
+	case wlan_interface_state_disconnecting: return "Disconnecting";
+	case wlan_interface_state_disconnected: return "Disconnected";
+	case wlan_interface_state_associating: return "Associating";
+	case wlan_interface_state_discovering: return "Discovering";
+	case wlan_interface_state_authenticating: return "Authenticating";
+	}
+	return "Unknown";
+}
+
+static const CHAR*
+WlanAuthToStr(DOT11_AUTH_ALGORITHM auth)
+{
+	switch (auth)
+	{
+	case DOT11_AUTH_ALGO_80211_OPEN: return "Open System";
+	case DOT11_AUTH_ALGO_80211_SHARED_KEY: return "Shared Key";
+	case DOT11_AUTH_ALGO_WPA: return "WPA";
+	case DOT11_AUTH_ALGO_WPA_PSK: return "WPA PSK";
+	case DOT11_AUTH_ALGO_WPA_NONE: return "WPA NONE";
+	case DOT11_AUTH_ALGO_RSNA: return "WPA2";
+	case DOT11_AUTH_ALGO_RSNA_PSK: return "WPA2 PSK";
+	case DOT11_AUTH_ALGO_WPA3_ENT_192: return "WPA3 ENT 192"; // DOT11_AUTH_ALGO_WPA3
+	case DOT11_AUTH_ALGO_WPA3_SAE: return "WPA3 SAE";
+	case DOT11_AUTH_ALGO_OWE: return "OWE";
+	case DOT11_AUTH_ALGO_WPA3_ENT: return "WPA3 ENT";
+	}
+	return "Unknown";
+}
+
+static const CHAR*
+WlanCipherToStr(DOT11_CIPHER_ALGORITHM cipher)
+{
+	switch (cipher)
+	{
+	case DOT11_CIPHER_ALGO_NONE: return "None";
+	case DOT11_CIPHER_ALGO_WEP40: return "WEP 40";
+	case DOT11_CIPHER_ALGO_TKIP: return "TKIP";
+	case DOT11_CIPHER_ALGO_CCMP: return "CCMP";
+	case DOT11_CIPHER_ALGO_WEP104: return "WEP 104";
+	}
+	return "Unknown";
+}
+
+static void
+GetWlanInfo(PNODE node, PIP_ADAPTER_ADDRESSES_XP ipAdapter)
+{
+	DWORD dwBuf;
+	HANDLE hClient = NULL;
+	GUID guidIf;
+	WLAN_CONNECTION_ATTRIBUTES* wlanAttr = NULL;
+
+	DWORD (WINAPI *OsWlanOpenHandle)(DWORD, PVOID, PDWORD, PHANDLE);
+	DWORD (WINAPI *OsWlanQueryInterface)(HANDLE, const GUID*, WLAN_INTF_OPCODE, PVOID, PDWORD, PVOID*, PWLAN_OPCODE_VALUE_TYPE);
+	void (WINAPI *OsWlanFreeMemory)(PVOID);
+	DWORD (WINAPI *OsWlanCloseHandle)(HANDLE, PVOID);
+	HMODULE hL = LoadLibraryW(L"wlanapi.dll");
+	if (!hL)
+		return;
+	*(FARPROC*)&OsWlanOpenHandle = GetProcAddress(hL, "WlanOpenHandle");
+	if (!OsWlanOpenHandle)
+		return;
+	*(FARPROC*)&OsWlanQueryInterface = GetProcAddress(hL, "WlanQueryInterface");
+	if (!OsWlanQueryInterface)
+		return;
+	*(FARPROC*)&OsWlanFreeMemory = GetProcAddress(hL, "WlanFreeMemory");
+	if (!OsWlanFreeMemory)
+		return;
+	*(FARPROC*)&OsWlanCloseHandle = GetProcAddress(hL, "WlanCloseHandle");
+	if (!OsWlanCloseHandle)
+		return;
+
+	if (NWL_StrToGuid(ipAdapter->AdapterName, &guidIf) != TRUE)
+		return;
+
+	if (OsWlanOpenHandle(2, NULL, &dwBuf, &hClient) != ERROR_SUCCESS)
+		return;
+
+	if (OsWlanQueryInterface(hClient, &guidIf,
+		wlan_intf_opcode_current_connection, NULL, &dwBuf, (PVOID*)&wlanAttr, NULL) != ERROR_SUCCESS)
+		goto end;
+
+	NWL_NodeAttrSet(node, "WLAN State", WlanStateToStr(wlanAttr->isState), 0);
+	if (wlanAttr->isState != wlan_interface_state_connected)
+		goto end;
+	NWL_NodeAttrSet(node, "WLAN Profile", NWL_Ucs2ToUtf8(wlanAttr->strProfileName), 0);
+	NWL_NodeAttrSetf(node, "WLAN Signal Quality", NAFLG_FMT_NUMERIC,
+		"%lu", wlanAttr->wlanAssociationAttributes.wlanSignalQuality);
+	NWL_NodeAttrSet(node, "WLAN Auth", WlanAuthToStr(wlanAttr->wlanSecurityAttributes.dot11AuthAlgorithm), 0);
+	NWL_NodeAttrSet(node, "WLAN Cipher", WlanCipherToStr(wlanAttr->wlanSecurityAttributes.dot11CipherAlgorithm), 0);
+
+end:
+	if (wlanAttr)
+		OsWlanFreeMemory(wlanAttr);
+	OsWlanCloseHandle(hClient, NULL);
 }
 
 static PIP_ADAPTER_ADDRESSES_XP
@@ -120,8 +267,14 @@ PNODE NW_Network(VOID)
 	PVOID pMaxAddress = NULL;
 	BOOL bLonghornOrLater;
 	PNODE node = NWL_NodeAlloc("Network", NFLG_TABLE);
+
+	total_recv = 0;
+	total_send = 0;
+
 	if (NWLC->NetInfo)
 		NWL_NodeAppendChild(NWLC->NwRoot, node);
+	if (!(NWLC->NetFlags & (NW_NET_IPV4 | NW_NET_IPV6)))
+		NWLC->NetFlags |= NW_NET_IPV4 | NW_NET_IPV6;
 
 	bLonghornOrLater = (NWLC->NwOsInfo.dwMajorVersion >= 6);
 
@@ -134,15 +287,32 @@ PNODE NW_Network(VOID)
 	{
 		PNODE nic = NULL;
 		LPCSTR desc = NULL;
-		if (NWLC->ActiveNet && pCurrAddresses->OperStatus != IfOperStatusUp)
+		BOOL bMatch = FALSE;
+		if (NWLC->NetGuid && _stricmp(NWLC->NetGuid, pCurrAddresses->AdapterName) != 0)
+			goto next_addr;
+		if ((NWLC->NetFlags & NW_NET_ACTIVE) && pCurrAddresses->OperStatus != IfOperStatusUp)
+			goto next_addr;
+		if (!(NWLC->NetFlags & (NW_NET_ETH | NW_NET_WLAN)))
+			bMatch = TRUE;
+		if ((NWLC->NetFlags & NW_NET_ETH) && pCurrAddresses->IfType == IF_TYPE_ETHERNET_CSMACD)
+			bMatch = TRUE;
+		if ((NWLC->NetFlags & NW_NET_WLAN) && pCurrAddresses->IfType == IF_TYPE_IEEE80211)
+			bMatch = TRUE;
+		if (bMatch == FALSE)
 			goto next_addr;
 		desc = NWL_Ucs2ToUtf8(pCurrAddresses->Description);
-		if (NWLC->SkipVirtualNet)
+		if (NWLC->NetFlags & NW_NET_PHYS)
 		{
 			if (pCurrAddresses->IfType == IF_TYPE_SOFTWARE_LOOPBACK ||
 				pCurrAddresses->IfType == IF_TYPE_TUNNEL)
 				goto next_addr;
 			if (strncmp(desc, "Microsoft Wi-Fi Direct Virtual Adapter", 38) == 0)
+				goto next_addr;
+			if (strncmp(desc, "Bluetooth Device", 16) == 0)
+				goto next_addr;
+			if (strncmp(desc, "VMware Virtual Ethernet Adapter", 31) == 0)
+				goto next_addr;
+			if (strncmp(desc, "VirtualBox Host-Only Ethernet Adapter", 37) == 0)
 				goto next_addr;
 		}
 		pCurrAddressesLH = (PIP_ADAPTER_ADDRESSES_LH)pCurrAddresses;
@@ -150,6 +320,8 @@ PNODE NW_Network(VOID)
 		NWL_NodeAttrSet(nic, "Network Adapter", pCurrAddresses->AdapterName, NAFLG_FMT_GUID);
 		NWL_NodeAttrSet(nic, "Description", desc, 0);
 		NWL_NodeAttrSet(nic, "Type", IfTypeToStr(pCurrAddresses->IfType), 0);
+		if (pCurrAddresses->IfType == IF_TYPE_IEEE80211)
+			GetWlanInfo(nic, pCurrAddresses);
 		if (pCurrAddresses->PhysicalAddressLength != 0)
 		{
 			NWLC->NwBuf[0] = '\0';
@@ -170,9 +342,8 @@ PNODE NW_Network(VOID)
 			PNODE n_unicast = NWL_NodeAppendNew(nic, "Unicasts", NFLG_TABLE);
 			for (i = 0; pUnicast != NULL && pUnicast < (PIP_ADAPTER_UNICAST_ADDRESS_XP)pMaxAddress; i++)
 			{
-				PNODE unicast = NWL_NodeAppendNew(n_unicast, "Unicast Address", NFLG_TABLE_ROW);
-				DisplayAddress(unicast, &pUnicast->Address, NULL);
-				if (bLonghornOrLater && pUnicast->Address.lpSockaddr->sa_family == AF_INET)
+				PNODE unicast = DisplayAddress(n_unicast, "Unicast Address", &pUnicast->Address);
+				if (unicast && bLonghornOrLater && pUnicast->Address.lpSockaddr->sa_family == AF_INET)
 				{
 					ULONG SubnetMask = 0;
 					PIP_ADAPTER_UNICAST_ADDRESS_LH pUnicastLH = (PIP_ADAPTER_UNICAST_ADDRESS_LH)pUnicast;
@@ -190,8 +361,7 @@ PNODE NW_Network(VOID)
 			PNODE n_anycast = NWL_NodeAppendNew(nic, "Anycasts", NFLG_TABLE);
 			for (i = 0; pAnycast != NULL && pAnycast < (PIP_ADAPTER_ANYCAST_ADDRESS_XP)pMaxAddress; i++)
 			{
-				PNODE anycast = NWL_NodeAppendNew(n_anycast, "Anycast Address", NFLG_TABLE_ROW);
-				DisplayAddress(anycast, &pAnycast->Address, NULL);
+				DisplayAddress(n_anycast, "Anycast Address", &pAnycast->Address);
 				pAnycast = pAnycast->Next;
 			}
 		}
@@ -202,8 +372,7 @@ PNODE NW_Network(VOID)
 			PNODE n_multicast = NWL_NodeAppendNew(nic, "Multicasts", NFLG_TABLE);
 			for (i = 0; pMulticast != NULL && pMulticast < (PIP_ADAPTER_MULTICAST_ADDRESS_XP)pMaxAddress; i++)
 			{
-				PNODE multicast = NWL_NodeAppendNew(n_multicast, "Multicast Address", NFLG_TABLE_ROW);
-				DisplayAddress(multicast, &pMulticast->Address, NULL);
+				DisplayAddress(n_multicast, "Multicast Address", &pMulticast->Address);
 				pMulticast = pMulticast->Next;
 			}
 		}
@@ -216,8 +385,7 @@ PNODE NW_Network(VOID)
 				PNODE n_gateway = NWL_NodeAppendNew(nic, "Gateways", NFLG_TABLE);
 				for (i = 0; pGateway != NULL && pGateway < (PIP_ADAPTER_GATEWAY_ADDRESS_LH)pMaxAddress; i++)
 				{
-					PNODE gateway = NWL_NodeAppendNew(n_gateway, "Gateway", NFLG_TABLE_ROW);
-					DisplayAddress(gateway, &pGateway->Address, NULL);
+					DisplayAddress(n_gateway, "Gateway", &pGateway->Address);
 					pGateway = pGateway->Next;
 				}
 			}
@@ -229,18 +397,28 @@ PNODE NW_Network(VOID)
 			PNODE n_dns = NWL_NodeAppendNew(nic, "DNS Servers", NFLG_TABLE);
 			for (i = 0; pDnServer != NULL && pDnServer < (IP_ADAPTER_DNS_SERVER_ADDRESS*)pMaxAddress; i++)
 			{
-				PNODE dns = NWL_NodeAppendNew(n_dns, "DNS Server", NFLG_TABLE_ROW);
-				DisplayAddress(dns, &pDnServer->Address, NULL);
+				DisplayAddress(n_dns, "DNS Server", &pDnServer->Address);
 				pDnServer = pDnServer->Next;
 			}
 		}
 
-		if (bLonghornOrLater &&
-			pCurrAddressesLH->Dhcpv4Enabled && pCurrAddressesLH->Dhcpv4Server.iSockaddrLength >= sizeof(SOCKADDR_IN))
+		if (bLonghornOrLater && pCurrAddressesLH->Dhcpv4Enabled)
 		{
-			DisplayAddress(nic, &pCurrAddressesLH->Dhcpv4Server, "DHCP Server");
+			BOOL bIpv6; // unused
+			const CHAR* buf = IpAddrToStr(&pCurrAddressesLH->Dhcpv4Server, &bIpv6);
+			if (buf)
+				NWL_NodeAttrSet(nic, "DHCP Server", buf, NAFLG_FMT_IPADDR);
 		}
-
+#if 0
+		if (bLonghornOrLater && pCurrAddressesLH->Ipv6Enabled)
+		{
+			// This structure member is not currently supported and is reserved for future use.
+			BOOL bIpv6; // unused
+			const CHAR* buf = IpAddrToStr(&pCurrAddressesLH->Dhcpv6Server, &bIpv6);
+			if (buf)
+				NWL_NodeAttrSet(nic, "DHCPv6 Server", buf, NAFLG_FMT_IPADDR);
+		}
+#endif
 		if (bLonghornOrLater)
 		{
 			NWL_NodeAttrSet(nic, "Transmit Link Speed",
@@ -255,7 +433,9 @@ PNODE NW_Network(VOID)
 		if (GetIfEntry(&ifRow) == NO_ERROR)
 		{
 			NWL_NodeAttrSetf(nic, "Received (Octets)", NAFLG_FMT_NUMERIC, "%lu", ifRow.dwInOctets);
+			total_recv += ifRow.dwInOctets;
 			NWL_NodeAttrSetf(nic, "Sent (Octets)", NAFLG_FMT_NUMERIC, "%lu", ifRow.dwOutOctets);
+			total_send += ifRow.dwOutOctets;
 		}
 next_addr:
 		pCurrAddresses = pCurrAddresses->Next;

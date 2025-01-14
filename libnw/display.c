@@ -382,14 +382,13 @@ EnumRes(PNODE node, LPCWSTR dev)
 	PNODE nm = NWL_NodeAppendNew(node, "Modes", NFLG_ATTGROUP);
 	for (i = 0; EnumDisplaySettingsExW(dev, i, &dm, 0); i++)
 	{
-		char* p = NULL;
 		DWORD freq = 0;
 		if (!(dm.dmFields & DM_PELSWIDTH) || !(dm.dmFields & DM_PELSHEIGHT)
 			|| !(dm.dmFields & DM_DISPLAYFREQUENCY) || !(dm.dmFields & DM_BITSPERPEL))
 			continue;
 		snprintf(NWLC->NwBuf, NWINFO_BUFSZ, "%lux%lu", dm.dmPelsWidth, dm.dmPelsHeight);
-		p = NWL_NodeAttrGet(nm, NWLC->NwBuf);
-		if (p)
+		LPCSTR p = NWL_NodeAttrGet(nm, NWLC->NwBuf);
+		if (p[0] != '-')
 			freq = strtoul(p, NULL, 10);
 		if (freq < dm.dmDisplayFrequency)
 			NWL_NodeAttrSetf(nm, NWLC->NwBuf, NAFLG_FMT_NUMERIC, "%u", dm.dmDisplayFrequency);
@@ -416,6 +415,17 @@ EnumDisp(PNODE node)
 		NWL_NodeAttrSetBool(nm, "Remote", dd.StateFlags & DISPLAY_DEVICE_REMOTE, 0);
 		EnumRes(nm, dd.DeviceName);
 	}
+}
+
+VOID
+NWL_GetCurDisplay(HWND wnd, NWLIB_CUR_DISPLAY* info)
+{
+	MONITORINFO mni = { .cbSize = sizeof(MONITORINFO) };
+	GetMonitorInfoW(MonitorFromWindow(wnd, MONITOR_DEFAULTTONEAREST), &mni);
+	info->Width = mni.rcMonitor.right - mni.rcMonitor.left;
+	info->Height = mni.rcMonitor.bottom - mni.rcMonitor.top;
+	info->Dpi = GetDpiForWindow(wnd);
+	info->Scale = 100 * info->Dpi / USER_DEFAULT_SCREEN_DPI;
 }
 
 PNODE NW_Edid(VOID)

@@ -17,6 +17,8 @@ static const CHAR* Win10BuildNumber(DWORD dwBuildNumber)
 {
 	switch (dwBuildNumber)
 	{
+	case 26100U:
+		return "11 24H2";
 	case 22631U:
 		return "11 23H2"; // Sun Valley 3
 	case 22621U:
@@ -52,7 +54,7 @@ static const CHAR* Win10BuildNumber(DWORD dwBuildNumber)
 	case 10240U:
 		return "10 1507"; // Threshold
 	}
-	if (dwBuildNumber >= 22000U)
+	if (dwBuildNumber >= 21344U)
 		return "11";
 	return "10";
 }
@@ -61,6 +63,10 @@ static const CHAR* WinServer2016BuildNumber(DWORD dwBuildNumber)
 {
 	switch (dwBuildNumber)
 	{
+	case 26100U:
+		return "Server 2025";
+	case 25398U:
+		return "Server, Version 23H2"; // WTF?
 	case 20348U:
 		return "Server 2022";
 	case 19042U:
@@ -80,9 +86,11 @@ static const CHAR* WinServer2016BuildNumber(DWORD dwBuildNumber)
 	case 14393U:
 		return "Server 2016";
 	}
-	if (dwBuildNumber >= 20348U)
+	if (dwBuildNumber >= 25871U)
+		return "Server 2025";
+	if (dwBuildNumber >= 19504U)
 		return "Server 2022";
-	else if (dwBuildNumber >= 17763U)
+	if (dwBuildNumber >= 17609U)
 		return "Server 2019";
 	return "Server 2016";
 }
@@ -272,6 +280,10 @@ static void PrintOsInfo(PNODE node)
 		NWL_NodeAttrSet(node, "System Directory", NWL_Ucs2ToUtf8(infoBuf), 0);
 	if (GetWindowsDirectoryW(infoBuf, NWINFO_BUFSZW))
 		NWL_NodeAttrSet(node, "Windows Directory", NWL_Ucs2ToUtf8(infoBuf), 0);
+	if (NWL_GetRegDwordValue(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System", L"EnableLUA", &dwType) == 0)
+		NWL_NodeAttrSetBool(node, "UAC", dwType, 0);
+	if (NWL_GetRegDwordValue(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Power", L"HiberbootEnabled", &dwType) == 0)
+		NWL_NodeAttrSetBool(node, "Fast Startup", dwType, 0);
 	NWL_GetUptime((CHAR*)NWLC->NwBuf, NWINFO_BUFSZ);
 	NWL_NodeAttrSet(node, "Uptime", (CHAR*)NWLC->NwBuf, 0);
 	switch (NWLC->NwSi.wProcessorArchitecture)
@@ -396,6 +408,13 @@ VOID NWL_GetMemInfo(PNWLIB_MEM_INFO pMemInfo)
 	pMemInfo->SfciAvail = sfci.PeakSize - sfci.CurrentSize;
 	if (pMemInfo->SfciTotal && pMemInfo->SfciTotal >= pMemInfo->SfciInUse)
 		pMemInfo->SfciUsage = (DWORD)(pMemInfo->SfciInUse * 100 / pMemInfo->SfciTotal);
+
+	memcpy(pMemInfo->StrPhysAvail, NWL_GetHumanSize(pMemInfo->PhysAvail, NWLC->NwUnits, 1024), NWL_STR_SIZE);
+	memcpy(pMemInfo->StrPhysTotal, NWL_GetHumanSize(pMemInfo->PhysTotal, NWLC->NwUnits, 1024), NWL_STR_SIZE);
+	memcpy(pMemInfo->StrPageAvail, NWL_GetHumanSize(pMemInfo->PageAvail, NWLC->NwUnits, 1024), NWL_STR_SIZE);
+	memcpy(pMemInfo->StrPageTotal, NWL_GetHumanSize(pMemInfo->PageTotal, NWLC->NwUnits, 1024), NWL_STR_SIZE);
+	memcpy(pMemInfo->StrSfciAvail, NWL_GetHumanSize(pMemInfo->SfciAvail, NWLC->NwUnits, 1024), NWL_STR_SIZE);
+	memcpy(pMemInfo->StrSfciTotal, NWL_GetHumanSize(pMemInfo->SfciTotal, NWLC->NwUnits, 1024), NWL_STR_SIZE);
 }
 
 static void PrintMemInfo(PNODE node)
@@ -407,12 +426,12 @@ static void PrintMemInfo(PNODE node)
 	NWL_NodeAttrSetf(node, "Page Size", NAFLG_FMT_NUMERIC, "%Id", info.PageSize);
 	NWL_NodeAttrSetf(node, "Memory Usage", 0, "%lu%%", info.PhysUsage);
 	nphy = NWL_NodeAppendNew(node, "Physical Memory", NFLG_ATTGROUP);
-	NWL_NodeAttrSet(nphy, "Free", NWL_GetHumanSize(info.PhysAvail, NWLC->NwUnits, 1024), NAFLG_FMT_HUMAN_SIZE);
-	NWL_NodeAttrSet(nphy, "Total", NWL_GetHumanSize(info.PhysTotal, NWLC->NwUnits, 1024), NAFLG_FMT_HUMAN_SIZE);
+	NWL_NodeAttrSet(nphy, "Free", info.StrPhysAvail, NAFLG_FMT_HUMAN_SIZE);
+	NWL_NodeAttrSet(nphy, "Total", info.StrPhysTotal, NAFLG_FMT_HUMAN_SIZE);
 	NWL_NodeAttrSetf(node, "Paging File Usage", 0, "%lu%%", info.PageUsage);
 	npage = NWL_NodeAppendNew(node, "Paging File", NFLG_ATTGROUP);
-	NWL_NodeAttrSet(npage, "Free", NWL_GetHumanSize(info.PageAvail, NWLC->NwUnits, 1024), NAFLG_FMT_HUMAN_SIZE);
-	NWL_NodeAttrSet(npage, "Total", NWL_GetHumanSize(info.PageTotal, NWLC->NwUnits, 1024), NAFLG_FMT_HUMAN_SIZE);
+	NWL_NodeAttrSet(npage, "Free", info.StrPageAvail, NAFLG_FMT_HUMAN_SIZE);
+	NWL_NodeAttrSet(npage, "Total", info.StrPageTotal, NAFLG_FMT_HUMAN_SIZE);
 }
 
 static void PrintBootInfo(PNODE node)

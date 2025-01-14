@@ -266,10 +266,12 @@ static INT NWL_NodeAttrGetIndex(PNODE node, LPCSTR key)
 	return -1;
 }
 
-LPSTR NWL_NodeAttrGet(PNODE node, LPCSTR key)
+LPCSTR NWL_NodeAttrGet(PNODE node, LPCSTR key)
 {
-	int i = NWL_NodeAttrGetIndex(node, key);
-	return (i < 0) ? NULL : node->Attributes[i].LinkedAttribute->Value;
+	int i = -1;
+	if (node)
+		i = NWL_NodeAttrGetIndex(node, key);
+	return (i < 0) ? "-\0" : node->Attributes[i].LinkedAttribute->Value;
 }
 
 PNODE_ATT NWL_NodeAttrSet(PNODE node, LPCSTR key, LPCSTR value, INT flags)
@@ -466,7 +468,7 @@ VOID NWL_NodeAppendMultiSz(LPSTR* lpmszMulti, LPCSTR szNew)
 	*lpmszMulti = mszResult;
 }
 
-static SIZE_T json_escape_content(LPCSTR input, LPSTR buffer, DWORD bufferSize)
+static SIZE_T JsonEscapeContent(LPCSTR input, LPSTR buffer, DWORD bufferSize)
 {
 	CHAR* mbs = NWL_NodeMbsDup(input, NULL);
 	LPCSTR cIn = mbs;
@@ -506,7 +508,10 @@ static SIZE_T json_escape_content(LPCSTR input, LPSTR buffer, DWORD bufferSize)
 			cOut += 2;
 			break;
 		default:
-			memcpy(cOut, cIn, 1);
+			if ((*cIn > 0x00 && *cIn < 0x21) || *cIn == 0x7f)
+				memcpy(cOut, " ", 1);
+			else
+				memcpy(cOut, cIn, 1);
 			cOut += 1;
 			break;
 		}
@@ -517,7 +522,7 @@ static SIZE_T json_escape_content(LPCSTR input, LPSTR buffer, DWORD bufferSize)
 	return cOut - buffer;
 }
 
-static SIZE_T yaml_escape_content(LPCSTR input, LPSTR buffer, DWORD bufferSize)
+static SIZE_T YamlEscapeContent(LPCSTR input, LPSTR buffer, DWORD bufferSize)
 {
 	CHAR* mbs = NWL_NodeMbsDup(input, NULL);
 	LPCSTR cIn = mbs;
@@ -547,7 +552,10 @@ static SIZE_T yaml_escape_content(LPCSTR input, LPSTR buffer, DWORD bufferSize)
 			cOut += 2;
 			break;
 		default:
-			memcpy(cOut, cIn, 1);
+			if ((*cIn > 0x00 && *cIn < 0x21) || *cIn == 0x7f)
+				memcpy(cOut, " ", 1);
+			else
+				memcpy(cOut, cIn, 1);
 			cOut += 1;
 			break;
 		}
@@ -558,7 +566,7 @@ static SIZE_T yaml_escape_content(LPCSTR input, LPSTR buffer, DWORD bufferSize)
 	return cOut - buffer;
 }
 
-static SIZE_T lua_escape_content(LPCSTR input, LPSTR buffer, DWORD bufferSize)
+static SIZE_T LuaEscapeContent(LPCSTR input, LPSTR buffer, DWORD bufferSize)
 {
 	CHAR* mbs = NWL_NodeMbsDup(input, NULL);
 	LPCSTR cIn = mbs;
@@ -596,7 +604,10 @@ static SIZE_T lua_escape_content(LPCSTR input, LPSTR buffer, DWORD bufferSize)
 			cOut += 2;
 			break;
 		default:
-			memcpy(cOut, cIn, 1);
+			if ((*cIn > 0x00 && *cIn < 0x21) || *cIn == 0x7f)
+				memcpy(cOut, " ", 1);
+			else
+				memcpy(cOut, cIn, 1);
 			cOut += 1;
 			break;
 		}
@@ -651,7 +662,7 @@ static INT NWL_NodeToJson(PNODE node, FILE* file)
 					{
 						if (c != att->Value)
 							fputs(", ", file);
-						json_escape_content(c, NWLC->NwBuf, NWINFO_BUFSZ);
+						JsonEscapeContent(c, NWLC->NwBuf, NWINFO_BUFSZ);
 						fprintf(file, "\"%s\"", NWLC->NwBuf);
 					}
 					fputs(" ]", file);
@@ -660,7 +671,7 @@ static INT NWL_NodeToJson(PNODE node, FILE* file)
 					fputs(att->Value, file);
 				else
 				{
-					json_escape_content(att->Value, NWLC->NwBuf, NWINFO_BUFSZ);
+					JsonEscapeContent(att->Value, NWLC->NwBuf, NWINFO_BUFSZ);
 					fprintf(file, "\"%s\"", NWLC->NwBuf);
 				}
 				plural = 1;
@@ -734,7 +745,7 @@ static INT NWL_NodeToYaml(PNODE node, FILE* file)
 				{
 					if (c != attVal)
 						fputs(", ", file);
-					yaml_escape_content(c, NWLC->NwBuf, NWINFO_BUFSZ);
+					YamlEscapeContent(c, NWLC->NwBuf, NWINFO_BUFSZ);
 					fprintf(file, "\'%s\'", NWLC->NwBuf);
 				}
 				fputs(" ]", file);
@@ -743,7 +754,7 @@ static INT NWL_NodeToYaml(PNODE node, FILE* file)
 				fputs(attVal, file);
 			else
 			{
-				yaml_escape_content(attVal, NWLC->NwBuf, NWINFO_BUFSZ);
+				YamlEscapeContent(attVal, NWLC->NwBuf, NWINFO_BUFSZ);
 				fprintf(file, "\'%s\'", NWLC->NwBuf);
 			}
 			fputs(NODE_YAML_DELIM_NL, file);
@@ -781,7 +792,7 @@ static INT NWL_NodeToLua(PNODE node, FILE* file)
 	int indent = indent_depth;
 
 	if (!node->Parent)
-		fputs("#!lua"NODE_LUA_DELIM_NL"_NWINFO = ", file);
+		fputs("_NWINFO = ", file);
 
 	// Print header
 	fprintcx(file, NODE_LUA_DELIM_INDENT, indent);
@@ -816,14 +827,14 @@ static INT NWL_NodeToLua(PNODE node, FILE* file)
 					{
 						if (c != att->Value)
 							fputs(", ", file);
-						lua_escape_content(c, NWLC->NwBuf, NWINFO_BUFSZ);
+						LuaEscapeContent(c, NWLC->NwBuf, NWINFO_BUFSZ);
 						fprintf(file, "\"%s\"", NWLC->NwBuf);
 					}
 					fputs(" }", file);
 				}
 				else
 				{
-					lua_escape_content(att->Value, NWLC->NwBuf, NWINFO_BUFSZ);
+					LuaEscapeContent(att->Value, NWLC->NwBuf, NWINFO_BUFSZ);
 					fprintf(file, "\"%s\"", NWLC->NwBuf);
 				}
 				plural = 1;

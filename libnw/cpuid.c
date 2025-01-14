@@ -7,86 +7,60 @@
 #include "libnw.h"
 #include <libcpuid.h>
 #include <libcpuid_util.h>
-#include <pathcch.h>
 
 #include "utils.h"
 
-#include "../ryzenadj/ryzenadj.h"
-
-#ifdef _WIN64
-#define RY_DLL L"ryzenadjx64.dll"
-#else
-#define RY_DLL L"ryzenadj.dll"
-#endif
-
-static struct
+static __int64
+CpuCompareFileTime(const FILETIME* time1, const FILETIME* time2)
 {
-	HMODULE dll;
-	ryzen_access ry;
-	ryzen_access (CALL *init_ryzenadj)(VOID);
-	void (CALL* cleanup_ryzenadj)(ryzen_access ry);
-	int (CALL* init_table)(ryzen_access ry);
-	uint32_t (CALL *get_table_ver)(ryzen_access ry);
-	size_t (CALL *get_table_size)(ryzen_access ry);
-	float* (CALL *get_table_values)(ryzen_access ry);
-	int (CALL *refresh_table)(ryzen_access ry);
-	float (CALL *get_stapm_limit)(ryzen_access ry);
-	float (CALL *get_fast_limit)(ryzen_access ry);
-	float (CALL *get_slow_limit)(ryzen_access ry);
-} m_ry;
-
-static void
-RyzenAdjCleanup(void)
-{
-	if (m_ry.ry)
-		m_ry.cleanup_ryzenadj(m_ry.ry);
-	if (m_ry.dll)
-		FreeLibrary(m_ry.dll);
-	ZeroMemory(&m_ry, sizeof(m_ry));
+	__int64 a = ((__int64)time1->dwHighDateTime) << 32 | time1->dwLowDateTime;
+	__int64 b = ((__int64)time2->dwHighDateTime) << 32 | time2->dwLowDateTime;
+	return b - a;
 }
 
-static bool
-RyzenAdjInit(void)
+double
+NWL_GetCpuUsage(VOID)
 {
-	WCHAR dll_path[MAX_PATH];
-	GetModuleFileNameW(NULL, dll_path, MAX_PATH);
-	PathCchRemoveFileSpec(dll_path, MAX_PATH);
-	PathCchAppend(dll_path, MAX_PATH, RY_DLL);
-	m_ry.dll = LoadLibraryW(dll_path);
-	if (!m_ry.dll)
-		goto fail;
-	*(FARPROC*)&m_ry.init_ryzenadj = GetProcAddress(m_ry.dll, "init_ryzenadj");
-	*(FARPROC*)&m_ry.cleanup_ryzenadj = GetProcAddress(m_ry.dll, "cleanup_ryzenadj");
-	*(FARPROC*)&m_ry.init_table = GetProcAddress(m_ry.dll, "init_table");
-	*(FARPROC*)&m_ry.get_table_ver = GetProcAddress(m_ry.dll, "get_table_ver");
-	*(FARPROC*)&m_ry.get_table_size = GetProcAddress(m_ry.dll, "get_table_size");
-	*(FARPROC*)&m_ry.get_table_values = GetProcAddress(m_ry.dll, "get_table_values");
-	*(FARPROC*)&m_ry.refresh_table = GetProcAddress(m_ry.dll, "refresh_table");
-	*(FARPROC*)&m_ry.get_stapm_limit = GetProcAddress(m_ry.dll, "get_stapm_limit");
-	*(FARPROC*)&m_ry.get_fast_limit = GetProcAddress(m_ry.dll, "get_fast_limit");
-	*(FARPROC*)&m_ry.get_slow_limit = GetProcAddress(m_ry.dll, "get_slow_limit");
-	if (m_ry.init_ryzenadj == NULL ||
-		m_ry.cleanup_ryzenadj == NULL ||
-		m_ry.init_table == NULL ||
-		m_ry.get_table_ver == NULL ||
-		m_ry.get_table_size == NULL ||
-		m_ry.get_table_values == NULL ||
-		m_ry.refresh_table == NULL ||
-		m_ry.get_stapm_limit == NULL ||
-		m_ry.get_fast_limit == NULL ||
-		m_ry.get_slow_limit == NULL)
-	{
-		goto fail;
-	}
-	m_ry.ry = m_ry.init_ryzenadj();
-	if (m_ry.ry == NULL)
-		goto fail;
-	if (m_ry.init_table(m_ry.ry))
-		goto fail;
-	return TRUE;
-fail:
-	RyzenAdjCleanup();
-	return FALSE;
+	PDH_FMT_COUNTERVALUE value = { 0 };
+	if (NWLC->PdhCpuUsage &&
+		NWLC->PdhGetFormattedCounterValue(NWLC->PdhCpuUsage, PDH_FMT_DOUBLE, NULL, &value) == ERROR_SUCCESS)
+		return value.doubleValue;
+
+	double ret = 0.0;
+	static FILETIME old_idle = { 0 };
+	static FILETIME old_krnl = { 0 };
+	static FILETIME old_user = { 0 };
+	FILETIME idle = { 0 };
+	FILETIME krnl = { 0 };
+	FILETIME user = { 0 };
+	__int64 diff_idle, diff_krnl, diff_user, total;
+	GetSystemTimes(&idle, &krnl, &user);
+	diff_idle = CpuCompareFileTime(&idle, &old_idle);
+	diff_krnl = CpuCompareFileTime(&krnl, &old_krnl);
+	diff_user = CpuCompareFileTime(&user, &old_user);
+	total = diff_krnl + diff_user;
+	if (total != 0)
+		ret = (100.0 * _abs64(total - diff_idle)) / _abs64(total);
+	old_idle = idle;
+	old_krnl = krnl;
+	old_user = user;
+	return ret;
+}
+
+DWORD
+NWL_GetCpuFreq(VOID)
+{
+	DWORD ret = 0;
+	DWORD freq = 0;
+	PDH_FMT_COUNTERVALUE value = { 0 };
+	NWL_GetRegDwordValue(HKEY_LOCAL_MACHINE, L"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", L"~MHz", &ret);
+	if (NWLC->PdhCpuBaseFreq &&
+		NWLC->PdhGetFormattedCounterValue(NWLC->PdhCpuBaseFreq, PDH_FMT_LONG, NULL, &value) == ERROR_SUCCESS)
+		freq = (DWORD)value.longValue;
+	if (NWLC->PdhCpuFreq &&
+		NWLC->PdhGetFormattedCounterValue(NWLC->PdhCpuFreq, PDH_FMT_DOUBLE, NULL, &value) == ERROR_SUCCESS)
+		ret = (DWORD)(value.doubleValue * 0.01 * freq);
+	return ret;
 }
 
 static LPCSTR
@@ -186,17 +160,14 @@ PrintFeatures(PNODE node, const struct cpu_id_t* data)
 }
 
 static void
-PrintCpuMsr(PNODE node, struct cpu_id_t* data)
+GetMsrData(NWLIB_CPU_INFO* info, struct cpu_id_t* data)
 {
 	logical_cpu_t i;
-	bool affinity_saved = FALSE;
-	bool use_ryzenadj = FALSE;
 	int value = CPU_INVALID_VALUE;
+	bool affinity_saved = FALSE;
 	if (!data->flags[CPU_FEATURE_MSR] || NWLC->NwDrv == NULL)
 		return;
 	affinity_saved = save_cpu_affinity();
-	if (data->vendor == VENDOR_AMD)
-		use_ryzenadj = RyzenAdjInit();
 	for (i = 0; i < data->num_logical_cpus; i++)
 	{
 		if (!get_affinity_mask_bit(i, &data->affinity_mask))
@@ -212,39 +183,61 @@ PrintCpuMsr(PNODE node, struct cpu_id_t* data)
 			max_multi = 0;
 		if (cur_multi == CPU_INVALID_VALUE)
 			cur_multi = 0;
-		NWL_NodeAttrSetf(node, "Multiplier", 0, "%.1lf (%d - %d)",
+		snprintf(info->MsrMulti, NWL_STR_SIZE, "%.1lf (%d - %d)",
 			cur_multi / 100.0, min_multi / 100, max_multi / 100);
+		value = cpu_msrinfo(NWLC->NwDrv, INFO_TEMPERATURE);
+		if (value != CPU_INVALID_VALUE && value > 0)
+			info->MsrTemp = value; // Core Temperature
 		value = cpu_msrinfo(NWLC->NwDrv, INFO_PKG_TEMPERATURE);
 		if (value != CPU_INVALID_VALUE && value > 0)
-			NWL_NodeAttrSetf(node, "Temperature (C)", NAFLG_FMT_NUMERIC, "%d", value);
+			info->MsrTemp = value; // Package Temperature
 		value = cpu_msrinfo(NWLC->NwDrv, INFO_VOLTAGE);
 		if (value != CPU_INVALID_VALUE && value > 0)
-			NWL_NodeAttrSetf(node, "Core Voltage (V)", NAFLG_FMT_NUMERIC, "%.2lf", value / 100.0);
+			info->MsrVolt = value / 100.0;
+		value = cpu_msrinfo(NWLC->NwDrv, INFO_PKG_ENERGY);
+		if (value != CPU_INVALID_VALUE && value > info->MsrEnergy)
+		{
+			info->MsrPower = (value - info->MsrEnergy) / 100.0;
+			info->MsrEnergy = value;
+		}
 		value = cpu_msrinfo(NWLC->NwDrv, INFO_BUS_CLOCK);
 		if (value != CPU_INVALID_VALUE && value > 0)
-			NWL_NodeAttrSetf(node, "Bus Clock (MHz)", NAFLG_FMT_NUMERIC, "%.2lf", value / 100.0);
-		value = cpu_msrinfo(NWLC->NwDrv, INFO_PKG_POWER);
-		if (value != CPU_INVALID_VALUE && value > 0)
-			NWL_NodeAttrSetf(node, "Power (W)", NAFLG_FMT_NUMERIC, "%.2lf", value / 100.0);
+			info->MsrBus = value / 100.0;
 		value = cpu_msrinfo(NWLC->NwDrv, INFO_PKG_PL1);
 		if (value != CPU_INVALID_VALUE && value > 0)
-			NWL_NodeAttrSetf(node, "PL1 (W)", NAFLG_FMT_NUMERIC, "%.2lf", value / 100.0);
+			info->MsrPl1 = value / 100.0;
 		value = cpu_msrinfo(NWLC->NwDrv, INFO_PKG_PL2);
 		if (value != CPU_INVALID_VALUE && value > 0)
-			NWL_NodeAttrSetf(node, "PL2 (W)", NAFLG_FMT_NUMERIC, "%.2lf", value / 100.0);
-		if (use_ryzenadj)
-		{
-			m_ry.refresh_table(m_ry.ry);
-			NWL_NodeAttrSetf(node, "STAPM Limit (W)", NAFLG_FMT_NUMERIC, "%.2lf", m_ry.get_stapm_limit(m_ry.ry));
-			NWL_NodeAttrSetf(node, "PL1 (W)", NAFLG_FMT_NUMERIC, "%.2lf", m_ry.get_slow_limit(m_ry.ry));
-			NWL_NodeAttrSetf(node, "PL2 (W)", NAFLG_FMT_NUMERIC, "%.2lf", m_ry.get_fast_limit(m_ry.ry));
-		}
+			info->MsrPl2 = value / 100.0;
+
 		break;
 	}
-	if (use_ryzenadj)
-		RyzenAdjCleanup();
 	if (affinity_saved)
 		restore_cpu_affinity();
+}
+
+VOID
+NWL_GetCpuMsr(int count, NWLIB_CPU_INFO* info)
+{
+	int i;
+	if (count > NWLC->NwCpuid->num_cpu_types)
+		return;
+	for (i = 0; i < count; i++)
+		GetMsrData(&info[i], &NWLC->NwCpuid->cpu_types[i]);
+}
+
+static void
+PrintCpuMsr(PNODE node, struct cpu_id_t* data)
+{
+	NWLIB_CPU_INFO info = { 0 };
+	GetMsrData(&info, data);
+	NWL_NodeAttrSet(node, "Multiplier", info.MsrMulti, 0);
+	NWL_NodeAttrSetf(node, "Temperature (C)", NAFLG_FMT_NUMERIC, "%d", info.MsrTemp);
+	NWL_NodeAttrSetf(node, "Core Voltage (V)", NAFLG_FMT_NUMERIC, "%.2lf", info.MsrVolt);
+	NWL_NodeAttrSetf(node, "Bus Clock (MHz)", NAFLG_FMT_NUMERIC, "%.2lf", info.MsrBus);
+	NWL_NodeAttrSetf(node, "Energy (J)", NAFLG_FMT_NUMERIC, "%.2lf", info.MsrPower);
+	NWL_NodeAttrSetf(node, "PL1 (W)", NAFLG_FMT_NUMERIC, "%.2lf", info.MsrPl1);
+	NWL_NodeAttrSetf(node, "PL2 (W)", NAFLG_FMT_NUMERIC, "%.2lf", info.MsrPl2);
 }
 
 static void
@@ -255,11 +248,11 @@ PrintCpuInfo(PNODE node, struct cpu_id_t* data)
 	NWL_NodeAttrSet(node, "Vendor Name", CpuVendorToStr(data->vendor), 0);
 	NWL_NodeAttrSet(node, "Brand", data->brand_str, 0);
 	NWL_NodeAttrSet(node, "Code Name", data->cpu_codename, 0);
-	NWL_NodeAttrSetf(node, "Family", 0, "%02Xh", data->family);
-	NWL_NodeAttrSetf(node, "Model", 0, "%02Xh", data->model);
-	NWL_NodeAttrSetf(node, "Stepping", 0, "%02Xh", data->stepping);
-	NWL_NodeAttrSetf(node, "Ext.Family", 0, "%02Xh", data->ext_family);
-	NWL_NodeAttrSetf(node, "Ext.Model", 0, "%02Xh", data->ext_model);
+	NWL_NodeAttrSetf(node, "Family", 0, "%02Xh", data->x86.family);
+	NWL_NodeAttrSetf(node, "Model", 0, "%02Xh", data->x86.model);
+	NWL_NodeAttrSetf(node, "Stepping", 0, "%02Xh", data->x86.stepping);
+	NWL_NodeAttrSetf(node, "Ext.Family", 0, "%02Xh", data->x86.ext_family);
+	NWL_NodeAttrSetf(node, "Ext.Model", 0, "%02Xh", data->x86.ext_model);
 
 	NWL_NodeAttrSetf(node, "Cores", NAFLG_FMT_NUMERIC, "%d", data->num_cores);
 	NWL_NodeAttrSetf(node, "Logical CPUs", NAFLG_FMT_NUMERIC, "%d", data->num_logical_cpus);
@@ -304,7 +297,7 @@ PNODE NW_Cpuid(VOID)
 		NWL_NodeAttrSetf(node, "L3 Cache Instances", NAFLG_FMT_NUMERIC, "%d", id->l3_total_instances);
 	if (id->l4_total_instances >= 0)
 		NWL_NodeAttrSetf(node, "L4 Cache Instances", NAFLG_FMT_NUMERIC, "%d", id->l4_total_instances);
-	NWL_NodeAttrSetf(node, "CPU Clock (MHz)", NAFLG_FMT_NUMERIC, "%d", cpu_clock_by_os());
+	NWL_NodeAttrSetf(node, "CPU Clock (MHz)", NAFLG_FMT_NUMERIC, "%lu", NWL_GetCpuFreq());
 	for (i = 0; i < id->num_cpu_types; i++)
 	{
 		CHAR name[32];

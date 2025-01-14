@@ -26,6 +26,7 @@ VOID NW_Init(PNWLIB_CONTEXT pContext)
 	NWLC->NwFile = stdout;
 	NWLC->AcpiTable = 0;
 	NWLC->SmbiosType = 127;
+	NWLC->DiskPath = NULL;
 	NWL_NtGetVersion(&NWLC->NwOsInfo);
 	GetNativeSystemInfo(&NWLC->NwSi);
 	NWLC->NwRoot = NWL_NodeAlloc("NWinfo", 0);
@@ -47,6 +48,8 @@ VOID NW_Init(PNWLIB_CONTEXT pContext)
 		NWL_NodeAppendMultiSz(&NWLC->ErrLog, "Administrator required");
 	if (NWL_ObtainPrivileges(SE_SYSTEM_ENVIRONMENT_NAME) != ERROR_SUCCESS)
 		NWL_NodeAppendMultiSz(&NWLC->ErrLog, "SeSystemEnvironmentPrivilege required");
+
+	NWL_PdhInit();
 }
 
 VOID NW_Print(LPCSTR lpFileName)
@@ -83,12 +86,21 @@ VOID NW_Print(LPCSTR lpFileName)
 		NW_NetShare();
 	if (NWLC->AudioInfo)
 		NW_Audio();
+	if (NWLC->PublicIpInfo)
+		NW_PublicIp();
+	if (NWLC->ProductPolicyInfo)
+		NW_ProductPolicy();
+	if (NWLC->GpuInfo)
+		NW_Gpu();
+	if (NWLC->FontInfo)
+		NW_Font();
 	NW_Libinfo();
 	NW_Export(NWLC->NwRoot, NWLC->NwFile);
 }
 
 VOID NW_Fini(VOID)
 {
+	NWL_PdhFini();
 	if (NWLC->NwRsdp)
 		free(NWLC->NwRsdp);
 	if (NWLC->NwRsdt)

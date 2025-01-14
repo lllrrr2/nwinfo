@@ -209,13 +209,15 @@ gnwinfo_draw_settings_window(struct nk_context* ctx, float width, float height)
 	nk_checkbox_flags_label(ctx, gnwinfo_get_text(L"Enable Intel VROC"), &g_ctx.smart_flag, CDI_FLAG_ENABLE_INTEL_VROC);
 	nk_spacer(ctx);
 	nk_checkbox_flags_label(ctx, gnwinfo_get_text(L"Enable AMD RC2"), &g_ctx.smart_flag, CDI_FLAG_ENABLE_AMD_RC2);
+	nk_spacer(ctx);
+	nk_checkbox_flags_label(ctx, gnwinfo_get_text(L"Enable Realtek 9220DP"), &g_ctx.smart_flag, CDI_FLAG_ENABLE_REALTEK_9220DP);
 
 	nk_layout_row_dynamic(ctx, 0, 1);
 	set_label(ctx, gnwinfo_get_text(L"Window (Restart required)"));
 	nk_layout_row(ctx, NK_DYNAMIC, 0, 2, (float[2]) { 0.1f, 0.9f });
 	nk_spacer(ctx);
 	nk_checkbox_label(ctx, gnwinfo_get_text(L"Background Info"), &g_ctx.gui_bginfo);
-#ifdef GNWINFO_ENABLE_PDH
+#ifdef NWLIB_ENABLE_PDH
 	nk_spacer(ctx);
 	nk_checkbox_flags_label(ctx, gnwinfo_get_text(L"Enable PDH"), &g_ctx.main_flag, MAIN_NO_PDH);
 #endif

@@ -353,30 +353,6 @@ NWL_AcpiChecksum(VOID* base, UINT size)
 	return ret;
 }
 
-VOID NWL_TrimString(CHAR* String)
-{
-	CHAR* Pos1 = String;
-	CHAR* Pos2 = String;
-	size_t Len = strlen(String);
-
-	while (Len > 0)
-	{
-		if (String[Len - 1] != ' ' && String[Len - 1] != '\t')
-			break;
-		String[Len - 1] = 0;
-		Len--;
-	}
-
-	while (*Pos1 == ' ' || *Pos1 == '\t')
-		Pos1++;
-
-	while (*Pos1)
-		*Pos2++ = *Pos1++;
-	*Pos2++ = 0;
-
-	return;
-}
-
 INT NWL_GetRegDwordValue(HKEY Key, LPCWSTR SubKey, LPCWSTR ValueName, DWORD* pValue)
 {
 	HKEY hKey;
@@ -456,6 +432,46 @@ NWL_WinGuidToStr(BOOL bBracket, GUID* pGuid)
 		pGuid->Data4[4], pGuid->Data4[5], pGuid->Data4[6], pGuid->Data4[7],
 		bBracket ? "}" : "");
 	return GuidStr;
+}
+
+BOOL
+NWL_StrToGuid(const CHAR* cchText, GUID* pGuid)
+{
+	CHAR p[37];
+	size_t len = strlen(cchText);
+	memset(pGuid, 0, sizeof(GUID));
+
+	if (len == 38 && cchText[0] == '{' && cchText[37] == '}')
+		memcpy(p, cchText + 1, 36);
+	else if (len == 36)
+		memcpy(p, cchText, 36);
+	else
+		return FALSE;
+	p[36] = '\0';
+	if (p[8] != '-' || p[13] != '-' || p[18] != '-' || p[23] != '-')
+		return FALSE;
+	p[8] = 0;
+	pGuid->Data1 = strtoul(p, NULL, 16);
+	p[13] = 0;
+	pGuid->Data2 = (unsigned short)strtoul(p + 9, NULL, 16);
+	p[18] = 0;
+	pGuid->Data3 = (unsigned short)strtoul(p + 14, NULL, 16);
+	pGuid->Data4[7] = (unsigned char)strtoul(p + 34, NULL, 16);
+	p[34] = 0;
+	pGuid->Data4[6] = (unsigned char)strtoul(p + 32, NULL, 16);
+	p[32] = 0;
+	pGuid->Data4[5] = (unsigned char)strtoul(p + 30, NULL, 16);
+	p[30] = 0;
+	pGuid->Data4[4] = (unsigned char)strtoul(p + 28, NULL, 16);
+	p[28] = 0;
+	pGuid->Data4[3] = (unsigned char)strtoul(p + 26, NULL, 16);
+	p[26] = 0;
+	pGuid->Data4[2] = (unsigned char)strtoul(p + 24, NULL, 16);
+	p[23] = 0;
+	pGuid->Data4[1] = (unsigned char)strtoul(p + 21, NULL, 16);
+	p[21] = 0;
+	pGuid->Data4[0] = (unsigned char)strtoul(p + 19, NULL, 16);
+	return TRUE;
 }
 
 struct NWL_MONITOR_CTX

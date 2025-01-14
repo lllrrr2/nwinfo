@@ -2,6 +2,9 @@
 
 #include "libnw.h"
 #include "disk.h"
+
+#include <setupapi.h>
+
 #include "utils.h"
 #include "../libcdi/libcdi.h"
 
@@ -131,50 +134,6 @@ PrintVolumeInfo(PNODE pNode, LPCWSTR lpszVolume, PHY_DRIVE_INFO* pParent)
 	}
 }
 
-static DWORD GetDriveCount(BOOL Cdrom)
-{
-	DWORD Value = 0;
-	LPCWSTR Key = L"SYSTEM\\CurrentControlSet\\Services\\disk\\Enum";
-	if (Cdrom)
-		Key = L"SYSTEM\\CurrentControlSet\\Services\\cdrom\\Enum";
-	if (NWL_GetRegDwordValue(HKEY_LOCAL_MACHINE, Key, L"Count", &Value) != 0)
-		Value = 0;
-	return Value;
-}
-#if 0
-static HANDLE GetHandleByLetter(WCHAR Letter)
-{
-	WCHAR PhyPath[] = L"\\\\.\\A:";
-	PhyPath[4] = Letter;
-	return CreateFileW(PhyPath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, OPEN_EXISTING, 0, 0);
-}
-#endif
-static WCHAR *GetDriveHwId(BOOL Cdrom, DWORD Drive)
-{
-	DWORD dwType;
-	WCHAR drvRegKey[11]; // "4294967295"
-	LPCWSTR key = L"SYSTEM\\CurrentControlSet\\Services\\disk\\Enum";
-	if (Cdrom)
-		key = L"SYSTEM\\CurrentControlSet\\Services\\cdrom\\Enum";
-	swprintf(drvRegKey, 11, L"%u", Drive);
-	return NWL_NtGetRegValue(HKEY_LOCAL_MACHINE, key, drvRegKey, NULL, &dwType);
-}
-
-static WCHAR* GetDriveHwName(const WCHAR* HwId)
-{
-	WCHAR* HwName = NULL;
-	HKEY hKey = NULL;
-	DWORD dwType;
-	if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"SYSTEM\\CurrentControlSet\\Enum",
-		0, KEY_QUERY_VALUE, &hKey) != ERROR_SUCCESS)
-		return NULL;
-	HwName = NWL_NtGetRegValue(hKey, HwId, L"FriendlyName", NULL, &dwType);
-	if (!HwName)
-		HwName = NWL_NtGetRegValue(hKey, HwId, L"DeviceDesc", NULL, &dwType);
-	RegCloseKey(hKey);
-	return HwName;
-}
-
 static BOOL GetDriveByVolume(BOOL bIsCdRom, HANDLE hVolume, DWORD* pDrive)
 {
 	DWORD dwSize = 0;
@@ -187,12 +146,12 @@ static BOOL GetDriveByVolume(BOOL bIsCdRom, HANDLE hVolume, DWORD* pDrive)
 	switch (sdnDiskNumber.DeviceType)
 	{
 	case FILE_DEVICE_CD_ROM:
-	case FILE_DEVICE_CD_ROM_FILE_SYSTEM:
+	//case FILE_DEVICE_CD_ROM_FILE_SYSTEM:
 	case FILE_DEVICE_DVD:
 		return bIsCdRom ? TRUE : FALSE;
 	case FILE_DEVICE_DISK:
-	case FILE_DEVICE_DISK_FILE_SYSTEM:
-	case FILE_DEVICE_FILE_SYSTEM:
+	//case FILE_DEVICE_DISK_FILE_SYSTEM:
+	//case FILE_DEVICE_FILE_SYSTEM:
 		return bIsCdRom ? FALSE : TRUE;
 	}
 	return FALSE;
@@ -259,10 +218,40 @@ RemoveTrailingBackslash(WCHAR* lpszPath)
 	lpszPath[len - 1] = L'\0';
 }
 
+static VOID
+TrimString(CHAR* str)
+{
+	char* p1 = str;
+	char* p2 = str;
+	size_t len = strlen(str);
+	while (len > 0)
+	{
+		if (!isblank(str[len - 1]))
+			break;
+		str[len - 1] = '\0';
+		len--;
+	}
+	while (isblank(*p1))
+		p1++;
+	while (*p1)
+	{
+		if (!isprint(*p1))
+			*p1 = '?';
+		*p2++ = *p1++;
+	}
+	*p2++ = 0;
+
+}
+
+typedef struct
+{
+	DWORD  cbSize;
+	WCHAR  DevicePath[512];
+} MY_DEVIF_DETAIL_DATA;
+
 static DWORD GetDriveInfoList(BOOL bIsCdRom, PHY_DRIVE_INFO** pDriveList)
 {
 	DWORD i;
-	DWORD dwCount;
 	BOOL bRet;
 	DWORD dwBytes;
 	PHY_DRIVE_INFO* pInfo;
@@ -270,10 +259,29 @@ static DWORD GetDriveInfoList(BOOL bIsCdRom, PHY_DRIVE_INFO** pDriveList)
 	HANDLE hSearch;
 	WCHAR cchVolume[MAX_PATH];
 
-	dwCount = GetDriveCount(bIsCdRom);
+	DWORD dwCount = 0;
+	SP_DEVICE_INTERFACE_DATA ifData = { .cbSize = sizeof(SP_DEVICE_INTERFACE_DATA) };
+	MY_DEVIF_DETAIL_DATA detailData = { .cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W) };
+	SP_DEVINFO_DATA infoData = { .cbSize = sizeof(SP_DEVINFO_DATA) };
+	GUID devGuid = bIsCdRom ? GUID_DEVINTERFACE_CDROM : GUID_DEVINTERFACE_DISK;
+	HDEVINFO hDevInfo = SetupDiGetClassDevsW(&devGuid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+	if (hDevInfo == INVALID_HANDLE_VALUE)
+		return 0;
+
+	while (SetupDiEnumDeviceInterfaces(hDevInfo, NULL, &devGuid, dwCount, &ifData))
+		dwCount++;
+	if (dwCount == 0)
+	{
+		SetupDiDestroyDeviceInfoList(hDevInfo);
+		return 0;
+	}
+
 	*pDriveList = calloc(dwCount, sizeof(PHY_DRIVE_INFO));
 	if (!*pDriveList)
+	{
+		SetupDiDestroyDeviceInfoList(hDevInfo);
 		return 0;
+	}
 	pInfo = *pDriveList;
 
 	for (i = 0; i < dwCount; i++)
@@ -282,8 +290,36 @@ static DWORD GetDriveInfoList(BOOL bIsCdRom, PHY_DRIVE_INFO** pDriveList)
 		STORAGE_PROPERTY_QUERY Query = { 0 };
 		STORAGE_DESCRIPTOR_HEADER DevDescHeader = { 0 };
 		STORAGE_DEVICE_DESCRIPTOR* pDevDesc = NULL;
+		STORAGE_DEVICE_NUMBER sdn;
+		HANDLE hIfDev;
 
-		hDrive = NWL_GetDiskHandleById(bIsCdRom, FALSE, i);
+		if (!SetupDiEnumDeviceInterfaces(hDevInfo, NULL, &devGuid, i, &ifData))
+			goto next_drive;
+		if (!SetupDiGetDeviceInterfaceDetailW(hDevInfo, &ifData, (PSP_DEVICE_INTERFACE_DETAIL_DATA_W)&detailData,
+			sizeof(MY_DEVIF_DETAIL_DATA), NULL, &infoData))
+			goto next_drive;
+		hIfDev = CreateFileW(detailData.DevicePath,
+			GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+			NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+		if (hIfDev == INVALID_HANDLE_VALUE || hIfDev == NULL)
+			goto next_drive;
+		bRet = DeviceIoControl(hIfDev, IOCTL_STORAGE_GET_DEVICE_NUMBER,
+			NULL, 0, &sdn, (DWORD)(sizeof(STORAGE_DEVICE_NUMBER)),
+			&dwBytes, NULL);
+		CloseHandle(hIfDev);
+		if (bRet == FALSE)
+			goto next_drive;
+		pInfo[i].Index = sdn.DeviceNumber;
+
+		if (SetupDiGetDeviceInstanceIdW(hDevInfo, &infoData, NWLC->NwBufW, NWINFO_BUFSZB, NULL))
+			wcsncpy_s(pInfo[i].HwID, MAX_PATH, NWLC->NwBufW, MAX_PATH);
+		if (SetupDiGetDeviceRegistryPropertyW(hDevInfo, &infoData, SPDRP_FRIENDLYNAME,
+			NULL, (PBYTE)NWLC->NwBufW, NWINFO_BUFSZB, NULL) ||
+			SetupDiGetDeviceRegistryPropertyW(hDevInfo, &infoData, SPDRP_DEVICEDESC,
+				NULL, (PBYTE)NWLC->NwBufW, NWINFO_BUFSZB, NULL))
+			wcsncpy_s(pInfo[i].HwName, MAX_PATH, NWLC->NwBufW, MAX_PATH);
+
+		hDrive = NWL_GetDiskHandleById(bIsCdRom, FALSE, pInfo[i].Index);
 
 		if (!hDrive || hDrive == INVALID_HANDLE_VALUE)
 			goto next_drive;
@@ -309,34 +345,33 @@ static DWORD GetDriveInfoList(BOOL bIsCdRom, PHY_DRIVE_INFO** pDriveList)
 		pInfo[i].DeviceType = pDevDesc->DeviceType;
 		pInfo[i].RemovableMedia = pDevDesc->RemovableMedia;
 		pInfo[i].BusType = pDevDesc->BusType;
-		pInfo[i].HwID = GetDriveHwId(bIsCdRom, i);
 
 		if (pDevDesc->VendorIdOffset)
 		{
 			strcpy_s(pInfo[i].VendorId, MAX_PATH,
 				(char*)pDevDesc + pDevDesc->VendorIdOffset);
-			NWL_TrimString(pInfo[i].VendorId);
+			TrimString(pInfo[i].VendorId);
 		}
 
 		if (pDevDesc->ProductIdOffset)
 		{
 			strcpy_s(pInfo[i].ProductId, MAX_PATH,
 				(char*)pDevDesc + pDevDesc->ProductIdOffset);
-			NWL_TrimString(pInfo[i].ProductId);
+			TrimString(pInfo[i].ProductId);
 		}
 
 		if (pDevDesc->ProductRevisionOffset)
 		{
 			strcpy_s(pInfo[i].ProductRev, MAX_PATH,
 				(char*)pDevDesc + pDevDesc->ProductRevisionOffset);
-			NWL_TrimString(pInfo[i].ProductRev);
+			TrimString(pInfo[i].ProductRev);
 		}
 
 		if (pDevDesc->SerialNumberOffset)
 		{
 			strcpy_s(pInfo[i].SerialNumber, MAX_PATH,
 				(char*)pDevDesc + pDevDesc->SerialNumberOffset);
-			NWL_TrimString(pInfo[i].SerialNumber);
+			TrimString(pInfo[i].SerialNumber);
 		}
 
 		GetDiskPartMap(hDrive, bIsCdRom, &pInfo[i]);
@@ -347,11 +382,13 @@ next_drive:
 		if (hDrive && hDrive != INVALID_HANDLE_VALUE)
 			CloseHandle(hDrive);
 	}
+	SetupDiDestroyDeviceInfoList(hDevInfo);
 
 	for (bRet = TRUE, hSearch = FindFirstVolumeW(cchVolume, MAX_PATH);
 		bRet && hSearch != INVALID_HANDLE_VALUE;
 		bRet = FindNextVolumeW(hSearch, cchVolume, MAX_PATH))
 	{
+		DWORD dwIndex;
 		HANDLE hVolume;
 		RemoveTrailingBackslash(cchVolume);
 		hVolume = CreateFileW(cchVolume, 0,
@@ -364,10 +401,15 @@ next_drive:
 			continue;
 		}
 		CloseHandle(hVolume);
-		if (dwBytes >= dwCount || pInfo[dwBytes].VolumeCount >= 32)
+		for (dwIndex = 0; dwIndex < dwCount; dwIndex++)
+		{
+			if (dwBytes == pInfo[dwIndex].Index)
+				break;
+		}
+		if (dwIndex >= dwCount || pInfo[dwIndex].VolumeCount >= 32)
 			continue;
-		wcscpy_s(pInfo[dwBytes].Volumes[pInfo[dwBytes].VolumeCount], MAX_PATH, cchVolume);
-		pInfo[dwBytes].VolumeCount++;
+		wcscpy_s(pInfo[dwIndex].Volumes[pInfo[dwIndex].VolumeCount], MAX_PATH, cchVolume);
+		pInfo[dwIndex].VolumeCount++;
 	}
 
 	if (hSearch != INVALID_HANDLE_VALUE)
@@ -553,31 +595,52 @@ PrintIsSsd(PNODE node, PHY_DRIVE_INFO* info, DWORD index)
 		NWL_NodeAttrSetBool(node, "SSD", TRUE, 0);
 }
 
+static int __cdecl
+CompareDiskId(const void* a, const void* b)
+{
+	return ((int)((const PHY_DRIVE_INFO*)a)->Index) - ((int)((const PHY_DRIVE_INFO*)b)->Index);
+}
+
 static VOID
 PrintDiskInfo(BOOL cdrom, PNODE node, CDI_SMART* smart)
 {
 	PHY_DRIVE_INFO* PhyDriveList = NULL;
 	DWORD PhyDriveCount = 0, i = 0;
+	CHAR DiskPath[64];
 	PhyDriveCount = GetDriveInfoList(cdrom, &PhyDriveList);
 	if (PhyDriveCount == 0)
 		goto out;
+	qsort(PhyDriveList, PhyDriveCount, sizeof(PHY_DRIVE_INFO), CompareDiskId);
 	for (i = 0; i < PhyDriveCount; i++)
 	{
+		snprintf(DiskPath, sizeof(DiskPath),
+			cdrom ? "\\\\.\\CdRom%lu" : "\\\\.\\PhysicalDrive%lu", PhyDriveList[i].Index);
+		if (NWLC->DiskPath && _stricmp(NWLC->DiskPath, DiskPath) != 0)
+			continue;
+		if ((NWLC->DiskFlags & NW_DISK_PHYS) &&
+			(PhyDriveList[i].BusType == BusTypeVirtual || PhyDriveList[i].BusType == BusTypeFileBackedVirtual))
+			continue;
+		BOOL bMatchBus = FALSE;
+		if (!(NWLC->DiskFlags & (NW_DISK_NVME | NW_DISK_SATA | NW_DISK_SCSI | NW_DISK_SAS | NW_DISK_USB)))
+			bMatchBus = TRUE;
+		if ((NWLC->DiskFlags & NW_DISK_NVME) && PhyDriveList[i].BusType == BusTypeNvme)
+			bMatchBus = TRUE;
+		if ((NWLC->DiskFlags & NW_DISK_SATA) && PhyDriveList[i].BusType == BusTypeSata)
+			bMatchBus = TRUE;
+		if ((NWLC->DiskFlags & NW_DISK_SCSI) && PhyDriveList[i].BusType == BusTypeScsi)
+			bMatchBus = TRUE;
+		if ((NWLC->DiskFlags & NW_DISK_SAS) && PhyDriveList[i].BusType == BusTypeSas)
+			bMatchBus = TRUE;
+		if ((NWLC->DiskFlags & NW_DISK_USB) && PhyDriveList[i].BusType == BusTypeUsb)
+			bMatchBus = TRUE;
+		if (bMatchBus == FALSE)
+			continue;
 		PNODE nd = NWL_NodeAppendNew(node, "Disk", NFLG_TABLE_ROW);
-		NWL_NodeAttrSetf(nd, "Path", 0,
-			cdrom ? "\\\\.\\CdRom%u" : "\\\\.\\PhysicalDrive%u", i);
-		if (PhyDriveList[i].HwID)
-		{
-			WCHAR* hwName = NULL;
+		NWL_NodeAttrSet(nd, "Path",DiskPath, 0);
+		if (PhyDriveList[i].HwID[0])
 			NWL_NodeAttrSet(nd, "HWID", NWL_Ucs2ToUtf8(PhyDriveList[i].HwID), 0);
-			hwName = GetDriveHwName(PhyDriveList[i].HwID);
-			if (hwName)
-			{
-				NWL_NodeAttrSet(nd, "HW Name", NWL_Ucs2ToUtf8(hwName), 0);
-				free(hwName);
-			}
-			free(PhyDriveList[i].HwID);
-		}
+		if (PhyDriveList[i].HwName[0])
+			NWL_NodeAttrSet(nd, "HW Name", NWL_Ucs2ToUtf8(PhyDriveList[i].HwName), 0);
 		if (PhyDriveList[i].VendorId[0])
 			NWL_NodeAttrSet(nd, "Vendor ID", PhyDriveList[i].VendorId, 0);
 		if (PhyDriveList[i].ProductId[0])
@@ -608,9 +671,9 @@ PrintDiskInfo(BOOL cdrom, PNODE node, CDI_SMART* smart)
 		}
 		if (!cdrom)
 		{
-			PrintIsSsd(nd, &PhyDriveList[i], i);
-			if (NWLC->DisableSmart == FALSE && smart)
-				PrintSmartInfo(nd, smart, GetSmartIndex(smart, i));
+			PrintIsSsd(nd, &PhyDriveList[i], PhyDriveList[i].Index);
+			if (!(NWLC->DiskFlags & NW_DISK_NO_SMART) && smart)
+				PrintSmartInfo(nd, smart, GetSmartIndex(smart, PhyDriveList[i].Index));
 		}
 		if (PhyDriveList[i].VolumeCount)
 		{
@@ -634,12 +697,16 @@ PNODE NW_Disk(VOID)
 	PNODE node = NWL_NodeAlloc("Disks", NFLG_TABLE);
 	if (NWLC->DiskInfo)
 		NWL_NodeAppendChild(NWLC->NwRoot, node);
-	if (NWLC->DisableSmart == FALSE && NWLC->NwSmart && NWLC->NwSmartInit == FALSE)
+	if (!(NWLC->DiskFlags & NW_DISK_NO_SMART) && NWLC->NwSmart && NWLC->NwSmartInit == FALSE)
 	{
 		cdi_init_smart(NWLC->NwSmart, NWLC->NwSmartFlags);
 		NWLC->NwSmartInit = TRUE;
 	}
-	PrintDiskInfo(FALSE, node, NWLC->NwSmart);
-	PrintDiskInfo(TRUE, node, NWLC->NwSmart);
+	if (!(NWLC->DiskFlags & (NW_DISK_CD | NW_DISK_HD)))
+		NWLC->DiskFlags |= NW_DISK_CD | NW_DISK_HD;
+	if (NWLC->DiskFlags & NW_DISK_HD)
+		PrintDiskInfo(FALSE, node, NWLC->NwSmart);
+	if (NWLC->DiskFlags & NW_DISK_CD)
+		PrintDiskInfo(TRUE, node, NWLC->NwSmart);
 	return node;
 }

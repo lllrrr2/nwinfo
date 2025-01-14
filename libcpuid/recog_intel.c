@@ -24,8 +24,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 #include <string.h>
-#include <ctype.h>
 #include "libcpuid.h"
+#include "libcpuid_ctype.h"
 #include "libcpuid_util.h"
 #include "libcpuid_internal.h"
 #include "recog_intel.h"
@@ -66,10 +66,14 @@ enum _intel_model_t {
 	_11xxx, /* Core i[3579] 11xxx */
 	_12xxx, /* Core i[3579] 12xxx */
 	_13xxx, /* Core i[3579] 13xxx */
+	_14xxx, /* Core i[3579] 14xxx */
 	_x1xx,  /* Xeon Bronze/Silver/Gold/Platinum x1xx */
 	_x2xx,  /* Xeon Bronze/Silver/Gold/Platinum x2xx */
 	_x3xx,  /* Xeon Bronze/Silver/Gold/Platinum x3xx */
 	_x4xx,  /* Xeon Bronze/Silver/Gold/Platinum/Max x4xx */
+	_x5xx,  /* Xeon Bronze/Silver/Gold/Platinum x5xx */
+	_1xx,   /* Core Ultra [3579] 1xx */
+	_2xx,   /* Core Ultra [3579] 2xx */
 };
 typedef enum _intel_model_t intel_model_t;
 
@@ -516,17 +520,44 @@ const struct match_entry_t cpudb_intel[] = {
 	{  6, 10, -1, -1, 186, -1,    -1,    -1, NC, CORE_|_I_|_9|_H   , _13xxx, "Raptor Lake-H (Core i9)"  },
 	{  6, 10, -1, -1, 186, -1,    -1,    -1, NC, CORE_|_I_|_7|_H   , _13xxx, "Raptor Lake-H (Core i7)"  },
 	{  6, 10, -1, -1, 186, -1,    -1,    -1, NC, CORE_|_I_|_5|_H   , _13xxx, "Raptor Lake-H (Core i5)"  },
+	/* Raptor Lake Refresh CPUs (2023, 14th Core i gen, Intel 7) => https://en.wikipedia.org/wiki/Raptor_Lake#List_of_14th_generation_Raptor_Lake_processors */
+	{  6,  7, -1, -1, 183, -1,    -1,    -1, NC, CORE_|_I_|_9      , _14xxx, "Raptor Lake-S (Core i9)"  },
+	{  6,  7, -1, -1, 183, -1,    -1,    -1, NC, CORE_|_I_|_7      , _14xxx, "Raptor Lake-S (Core i7)"  },
+	{  6,  7, -1, -1, 183, -1,    -1,    -1, NC, CORE_|_I_|_5      , _14xxx, "Raptor Lake-S (Core i5)"  },
+	{  6,  7, -1, -1, 183, -1,    -1,    -1, NC, CORE_|_I_|_3      , _14xxx, "Raptor Lake-S (Core i3)"  },
+	{  6,  7, -1, -1, 183, -1,    -1,    -1, NC, CORE_|_I_|_9|_H|_X, _14xxx, "Raptor Lake-HX (Core i9)" },
+	{  6,  7, -1, -1, 183, -1,    -1,    -1, NC, CORE_|_I_|_7|_H|_X, _14xxx, "Raptor Lake-HX (Core i7)" },
+	{  6,  7, -1, -1, 183, -1,    -1,    -1, NC, CORE_|_I_|_5|_H|_X, _14xxx, "Raptor Lake-HX (Core i5)" },
 
 	/* Sapphire Rapids CPUs (2023, 4th Xeon Scalable gen, Intel 7) => https://en.wikichip.org/wiki/intel/microarchitectures/sapphire_rapids */
 	{  6, 15, -1, -1, 143, -1,    -1,    -1, NC, XEON_|_W_|_9     , _x4xx, "Sapphire Rapids-WS (Xeon w9)"       },
 	{  6, 15, -1, -1, 143, -1,    -1,    -1, NC, XEON_|_W_|_7     , _x4xx, "Sapphire Rapids-WS (Xeon w7)"       },
 	{  6, 15, -1, -1, 143, -1,    -1,    -1, NC, XEON_|_W_|_5     , _x4xx, "Sapphire Rapids-WS (Xeon w5)"       },
 	{  6, 15, -1, -1, 143, -1,    -1,    -1, NC, XEON_|_W_|_3     , _x4xx, "Sapphire Rapids-WS (Xeon w3)"       },
-	{  6, 15, -1, -1, 143, -1,    -1,    -1, NC, XEON_|_MAX_      , _x4xx, "Sapphire Rapids-SP (Xeon Max)"      },
+	{  6, 15, -1, -1, 143, -1,    -1,    -1, NC, XEON_|_MAX_      , _x4xx, "Sapphire Rapids-HBM (Xeon Max)"     },
 	{  6, 15, -1, -1, 143, -1,    -1,    -1, NC, XEON_|_PLATINIUM_, _x4xx, "Sapphire Rapids-SP (Xeon Platinum)" },
 	{  6, 15, -1, -1, 143, -1,    -1,    -1, NC, XEON_|_GOLD_     , _x4xx, "Sapphire Rapids-SP (Xeon Gold)"     },
 	{  6, 15, -1, -1, 143, -1,    -1,    -1, NC, XEON_|_SILVER_   , _x4xx, "Sapphire Rapids-SP (Xeon Silver)"   },
 	{  6, 15, -1, -1, 143, -1,    -1,    -1, NC, XEON_|_BRONZE_   , _x4xx, "Sapphire Rapids-SP (Xeon Bronze)"   },
+
+	/* Emerald Rapids CPUs (2023, 5th Xeon Scalable gen, Intel 7) => https://en.wikichip.org/wiki/intel/microarchitectures/emerald_rapids */
+	{  6, 15, -1, -1, 207, -1,    -1,    -1, NC, XEON_|_PLATINIUM_, _x5xx, "Emerald Rapids-SP (Xeon Platinum)" }, // Xeon Platinum (8500)
+	{  6, 15, -1, -1, 207, -1,    -1,    -1, NC, XEON_|_GOLD_     , _x5xx, "Emerald Rapids-SP (Xeon Gold)"     }, // Xeon Gold (5500 and 6500)
+	{  6, 15, -1, -1, 207, -1,    -1,    -1, NC, XEON_|_SILVER_   , _x5xx, "Emerald Rapids-SP (Xeon Silver)"   }, // Xeon Silver (4500)
+	{  6, 15, -1, -1, 207, -1,    -1,    -1, NC, XEON_|_BRONZE_   , _x5xx, "Emerald Rapids-SP (Xeon Bronze)"   }, // Xeon Bronze (3500)
+
+	/* Meteor Lake CPUs (2023, Core Ultra Series 1 processors, Intel 4) => https://en.wikichip.org/wiki/intel/microarchitectures/meteor_lake */
+	{  6, 10, -1, -1, 170, -1,    -1,    -1, NC, CORE_|_ULTRA_|_9|_H, _1xx, "Meteor Lake-H (Core Ultra 9)" },
+	{  6, 10, -1, -1, 170, -1,    -1,    -1, NC, CORE_|_ULTRA_|_7|_H, _1xx, "Meteor Lake-H (Core Ultra 7)" },
+	{  6, 10, -1, -1, 170, -1,    -1,    -1, NC, CORE_|_ULTRA_|_5|_H, _1xx, "Meteor Lake-H (Core Ultra 5)" },
+	{  6, 10, -1, -1, 170, -1,    -1,    -1, NC, CORE_|_ULTRA_|_7|_U, _1xx, "Meteor Lake-U (Core Ultra 7)" },
+	{  6, 10, -1, -1, 170, -1,    -1,    -1, NC, CORE_|_ULTRA_|_5|_U, _1xx, "Meteor Lake-U (Core Ultra 5)" },
+
+	/* Arrow Lake CPUs (2024, Core Ultra Series 2 processors, TSMC N3B) => https://en.wikichip.org/wiki/intel/microarchitectures/arrow_lake */
+	{  6,  6, -1, -1, 198, -1,    -1,    -1, NC, CORE_|_ULTRA_|_9|_S, _2xx, "Arrow Lake-S (Core Ultra 9)" },
+	{  6,  6, -1, -1, 198, -1,    -1,    -1, NC, CORE_|_ULTRA_|_7|_S, _2xx, "Arrow Lake-S (Core Ultra 7)" },
+	{  6,  6, -1, -1, 198, -1,    -1,    -1, NC, CORE_|_ULTRA_|_5|_S, _2xx, "Arrow Lake-S (Core Ultra 5)" },
+	{  6,  6, -1, -1, 198, -1,    -1,    -1, NC, CORE_|_ULTRA_|_3|_S, _2xx, "Arrow Lake-S (Core Ultra 3)" },
 	/* F   M   S  EF   EM #cores L2$    L3$  BC       ModelBits ModelCode                                  Name */
 
 
@@ -558,7 +589,7 @@ static void load_intel_features(struct cpu_raw_data_t* raw, struct cpu_id_t* dat
 		{ 14, CPU_FEATURE_XTPR },
 		{ 15, CPU_FEATURE_PDCM },
 		{ 18, CPU_FEATURE_DCA },
-		{ 21, CPU_FEATURE_X2APIC },
+		/* id 21 is handled in common */
 	};
 	const struct feature_map_t matchtable_eax6[] = {
 		{ 0, CPU_FEATURE_INTEL_DTS },
@@ -571,21 +602,12 @@ static void load_intel_features(struct cpu_raw_data_t* raw, struct cpu_id_t* dat
 		{  2, CPU_FEATURE_SGX },
 		{  4, CPU_FEATURE_HLE },
 		{ 11, CPU_FEATURE_RTM },
-		{ 16, CPU_FEATURE_AVX512F },
-		{ 17, CPU_FEATURE_AVX512DQ },
-		/* id 18 and 19 are handled in common */
+		/* id 16 to 19 are handled in common */
 		{ 26, CPU_FEATURE_AVX512PF },
 		{ 27, CPU_FEATURE_AVX512ER },
-		{ 28, CPU_FEATURE_AVX512CD },
-		/* id 29 is handled in common */
-		{ 30, CPU_FEATURE_AVX512BW },
-		{ 31, CPU_FEATURE_AVX512VL },
+		/* id 28 to 31 are handled in common */
 	};
-	const struct feature_map_t matchtable_ecx7[] = {
-		{  1, CPU_FEATURE_AVX512VBMI },
-		{  6, CPU_FEATURE_AVX512VBMI2 },
-		{ 11, CPU_FEATURE_AVX512VNNI },
-	};
+
 	if (raw->basic_cpuid[0][EAX] >= 1) {
 		match_features(matchtable_edx1, COUNT_OF(matchtable_edx1), raw->basic_cpuid[1][EDX], data);
 		match_features(matchtable_ecx1, COUNT_OF(matchtable_ecx1), raw->basic_cpuid[1][ECX], data);
@@ -600,7 +622,6 @@ static void load_intel_features(struct cpu_raw_data_t* raw, struct cpu_id_t* dat
 	// detect TSX/AVX512:
 	if (raw->basic_cpuid[0][EAX] >= 7) {
 		match_features(matchtable_ebx7, COUNT_OF(matchtable_ebx7), raw->basic_cpuid[7][EBX], data);
-		match_features(matchtable_ecx7, COUNT_OF(matchtable_ecx7), raw->basic_cpuid[7][ECX], data);
 	}
 }
 
@@ -678,7 +699,7 @@ static void decode_intel_oldstyle_cache_info(struct cpu_raw_data_t* raw, struct 
 		 * CPUs (notably Conroe et al), this is L2 cache. In both cases
 		 * it means 4MB, 16-way associative, 64-byte line size.
 		 */
-		if (data->family == 0xf && data->model == 0x6) {
+		if (data->x86.family == 0xf && data->x86.model == 0x6) {
 			data->l3_cache = 4096;
 			data->l3_assoc = 16;
 			data->l3_cacheline = 64;
@@ -705,7 +726,7 @@ static int decode_intel_extended_topology(struct cpu_raw_data_t* raw, struct cpu
 {
 	int i, level_type, num_smt = -1, num_core = -1;
 
-	for (i = 0; (raw->intel_fn11[i][EAX] != 0x0) && (raw->intel_fn11[i][EBX] != 0x0) && (i < MAX_INTELFN11_LEVEL); i++) {
+	for (i = 0; (i < MAX_INTELFN11_LEVEL) && (raw->intel_fn11[i][EAX] != 0x0) && (raw->intel_fn11[i][EBX] != 0x0); i++) {
 		level_type = EXTRACTS_BITS(raw->intel_fn11[i][ECX], 15, 8);
 		switch (level_type) {
 			case 0x01:
@@ -782,7 +803,7 @@ static intel_code_and_bits_t get_brand_code_and_bits(struct cpu_id_t* data)
 			case '7': bits |= _7; break;
 			case '9': bits |= _9; break;
 		}
-		for(i = i + 11; i < (int) n; i++) {
+		for(i = i + 11; i < (int)n; i++) {
 			switch (bs[i]) {
 				case 'H': bits |= _H; break;
 				case 'K': bits |= _K; break;
@@ -791,6 +812,27 @@ static intel_code_and_bits_t get_brand_code_and_bits(struct cpu_id_t* data)
 				case 'S': bits |= _S; break;
 				case 'U': bits |= _U; break;
 				case 'X': bits |= _X; break;
+			}
+		}
+	}
+	if ((i = match_pattern(bs, "Core(TM) Ultra [579]")) != 0) {
+		bits |= CORE_ | _ULTRA_;
+		i--;
+		switch (bs[i + 15]) {
+			//case '3': bits |= _3; break;
+			case '5': bits |= _5; break;
+			case '7': bits |= _7; break;
+			case '9': bits |= _9; break;
+		}
+		for(i = i + 16; i < (int)n; i++) {
+			switch (bs[i]) {
+				case 'H': bits |= _H; break;
+				//case 'K': bits |= _K; break;
+				//case 'N': bits |= _N; break;
+				//case 'P': bits |= _P; break;
+				//case 'S': bits |= _S; break;
+				case 'U': bits |= _U; break;
+				//case 'X': bits |= _X; break;
 			}
 		}
 	}
@@ -829,6 +871,7 @@ static intel_code_and_bits_t get_brand_code_and_bits(struct cpu_id_t* data)
 			code = matchtable[i].c;
 			break;
 		}
+	debugf(2, "intel matchtable result is %d\n", code);
 	if (bits & XEON_) {
 		if (match_pattern(bs, "W35##") || match_pattern(bs, "[ELXW]75##"))
 			bits |= _7;
@@ -836,7 +879,7 @@ static intel_code_and_bits_t get_brand_code_and_bits(struct cpu_id_t* data)
 			code = GAINESTOWN;
 		else if (match_pattern(bs, "[ELXW]56##"))
 			code = WESTMERE;
-		else if (data->l3_cache > 0 && data->family == 16)
+		else if (data->l3_cache > 0 && data->x86.family == 16)
 			/* restrict by family, since later Xeons also have L3 ... */
 			code = IRWIN;
 	}
@@ -873,14 +916,14 @@ static intel_code_and_bits_t get_brand_code_and_bits(struct cpu_id_t* data)
 		}
 	}
 
-	if (code == CORE_DUO && (bits & MOBILE_) && data->model != 14) {
-		if (data->ext_model < 23) {
+	if (code == CORE_DUO && (bits & MOBILE_) && data->x86.model != 14) {
+		if (data->x86.ext_model < 23) {
 			code = MEROM;
 		} else {
 			code = PENRYN;
 		}
 	}
-	if (data->ext_model == 23 &&
+	if (data->x86.ext_model == 23 &&
 		(code == CORE_DUO || code == PENTIUM_D || (bits & CELERON_))) {
 		code = WOLFDALE;
 	}
@@ -912,6 +955,14 @@ static intel_model_t get_model_code(struct cpu_id_t* data)
 		if ((bs[i] == '1') && (bs[i+1] == '1')) return _11xxx;
 		if ((bs[i] == '1') && (bs[i+1] == '2')) return _12xxx;
 		if ((bs[i] == '1') && (bs[i+1] == '3')) return _13xxx;
+		if ((bs[i] == '1') && (bs[i+1] == '4')) return _14xxx;
+		return UNKNOWN;
+	}
+	else if ((i = match_pattern(bs, "Core(TM) Ultra [3579]")) != 0) {
+		i += 16;
+		if (i + 3 >= l) return UNKNOWN;
+		if (bs[i] == '1') return _1xx;
+		if (bs[i] == '2') return _2xx;
 		return UNKNOWN;
 	}
 	else if ((i = match_pattern(bs, "Xeon(R) [WBSGP]")) != 0) {
@@ -928,6 +979,7 @@ static intel_model_t get_model_code(struct cpu_id_t* data)
 		if (bs[i] == '2') return _x2xx;
 		if (bs[i] == '3') return _x3xx;
 		if (bs[i] == '4') return _x4xx;
+		if (bs[i] == '5') return _x5xx;
 		return UNKNOWN;
 	}
 
@@ -984,29 +1036,31 @@ static void decode_intel_sgx_features(const struct cpu_raw_data_t* raw, struct c
 	if (raw->basic_cpuid[0x12][EAX] == 0) return; // no sub-leafs available, probably it's disabled by BIOS
 
 	// decode sub-leaf 0:
-	if (raw->basic_cpuid[0x12][EAX] & 1) data->sgx.flags[INTEL_SGX1] = 1;
-	if (raw->basic_cpuid[0x12][EAX] & 2) data->sgx.flags[INTEL_SGX2] = 1;
-	if (data->sgx.flags[INTEL_SGX1] || data->sgx.flags[INTEL_SGX2])
-		data->sgx.present = 1;
-	data->sgx.misc_select = raw->basic_cpuid[0x12][EBX];
-	data->sgx.max_enclave_32bit = (raw->basic_cpuid[0x12][EDX]     ) & 0xff;
-	data->sgx.max_enclave_64bit = (raw->basic_cpuid[0x12][EDX] >> 8) & 0xff;
+	if (raw->basic_cpuid[0x12][EAX] & 1) data->x86.sgx.flags[INTEL_SGX1] = 1;
+	if (raw->basic_cpuid[0x12][EAX] & 2) data->x86.sgx.flags[INTEL_SGX2] = 1;
+	if (data->x86.sgx.flags[INTEL_SGX1] || data->x86.sgx.flags[INTEL_SGX2])
+		data->x86.sgx.present = 1;
+	data->x86.sgx.misc_select = raw->basic_cpuid[0x12][EBX];
+	data->x86.sgx.max_enclave_32bit = (raw->basic_cpuid[0x12][EDX]     ) & 0xff;
+	data->x86.sgx.max_enclave_64bit = (raw->basic_cpuid[0x12][EDX] >> 8) & 0xff;
 
 	// decode sub-leaf 1:
-	data->sgx.secs_attributes = raw->intel_fn12h[1][EAX] | (((uint64_t) raw->intel_fn12h[1][EBX]) << 32);
-	data->sgx.secs_xfrm       = raw->intel_fn12h[1][ECX] | (((uint64_t) raw->intel_fn12h[1][EDX]) << 32);
+	data->x86.sgx.secs_attributes = raw->intel_fn12h[1][EAX] | (((uint64_t) raw->intel_fn12h[1][EBX]) << 32);
+	data->x86.sgx.secs_xfrm       = raw->intel_fn12h[1][ECX] | (((uint64_t) raw->intel_fn12h[1][EDX]) << 32);
 
 	// decode higher-order subleafs, whenever present:
-	data->sgx.num_epc_sections = -1;
+	data->x86.sgx.num_epc_sections = -1;
 	for (i = 0; i < 1000000; i++) {
 		epc = cpuid_get_epc(i, raw);
 		if (epc.length == 0) {
-			data->sgx.num_epc_sections = i;
+			debugf(2, "SGX: epc section request for %d returned null, no more EPC sections.\n", i);
+			data->x86.sgx.num_epc_sections = i;
 			break;
 		}
 	}
-	if (data->sgx.num_epc_sections == -1) {
-		data->sgx.num_epc_sections = 1000000;
+	if (data->x86.sgx.num_epc_sections == -1) {
+		debugf(1, "SGX: warning: seems to be infinitude of EPC sections.\n");
+		data->x86.sgx.num_epc_sections = 1000000;
 	}
 }
 
@@ -1052,6 +1106,7 @@ int cpuid_identify_intel(struct cpu_raw_data_t* raw, struct cpu_id_t* data, stru
 	if ((raw->basic_cpuid[0][EAX] < 11) || (decode_intel_extended_topology(raw, data) == 0))
 		decode_number_of_cores_x86(raw, data);
 	data->purpose = cpuid_identify_purpose_intel(raw);
+	decode_architecture_version_x86(data);
 
 	brand = get_brand_code_and_bits(data);
 	model_code = get_model_code(data);
@@ -1061,11 +1116,21 @@ int cpuid_identify_intel(struct cpu_raw_data_t* raw, struct cpu_id_t* data, stru
 			break;
 		}
 	}
+	if (brand_code_str)
+		debugf(2, "Detected Intel brand code: %d (%s)\n", brand.code, brand_code_str);
+	else
+		debugf(2, "Detected Intel brand code: %d\n", brand.code);
+	if (brand.bits) {
+		debugf(2, "Detected Intel bits: ");
+		debug_print_lbits(2, brand.bits);
+	}
+	debugf(2, "Detected Intel model code: %d\n", model_code);
 
 	internal->code.intel = brand.code;
 	internal->bits = brand.bits;
 
 	if (data->flags[CPU_FEATURE_SGX]) {
+		debugf(2, "SGX seems to be present, decoding...\n");
 		// if SGX is indicated by the CPU, verify its presence:
 		decode_intel_sgx_features(raw, data);
 	}
@@ -1088,10 +1153,18 @@ cpu_purpose_t cpuid_identify_purpose_intel(struct cpu_raw_data_t* raw)
 	  EAX, bits 31-24: Core type
 	*/
 	if (EXTRACTS_BIT(raw->basic_cpuid[0x7][EDX], 15) == 0x1) {
+		debugf(3, "Detected Intel CPU hybrid architecture\n");
 		switch (EXTRACTS_BITS(raw->basic_cpuid[0x1a][EAX], 31, 24)) {
-			case 0x20: /* Atom */ return PURPOSE_EFFICIENCY;
-			case 0x40: /* Core */ return PURPOSE_PERFORMANCE;
-			default:              return PURPOSE_GENERAL;
+			case 0x20: /* Atom */
+				/* Acccording to Ramyer M. from Intel, LP E-Cores do not have a L3 cache
+				   https://community.intel.com/t5/Processors/Detecting-LP-E-Cores-on-Meteor-Lake-in-software/m-p/1584555/highlight/true#M70732
+				   If sub-leaf 3 is set, it is an E-Cores.
+				*/
+				return (EXTRACTS_BITS(raw->intel_fn4[3][EAX], 31, 0)) ? PURPOSE_EFFICIENCY : PURPOSE_LP_EFFICIENCY;
+			case 0x40: /* Core */
+				return PURPOSE_PERFORMANCE;
+			default:
+				return PURPOSE_GENERAL;
 		}
 	}
 

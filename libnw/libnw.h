@@ -2,8 +2,11 @@
 #pragma once
 
 #include <stdio.h>
+#define VC_EXTRALEAN
 #include <windows.h>
 #include <stdnoreturn.h>
+
+#include <pdh.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -41,16 +44,41 @@ typedef struct _NWLIB_CONTEXT
 	BOOL UefiInfo;
 	BOOL ShareInfo;
 	BOOL AudioInfo;
+	BOOL PublicIpInfo;
+	BOOL ProductPolicyInfo;
+	BOOL GpuInfo;
+	BOOL FontInfo;
 
 	BOOL Debug;
 	BOOL HideSensitive;
 
 	DWORD AcpiTable;
-	BOOL ActiveNet;
-	BOOL SkipVirtualNet;
 	UINT8 SmbiosType;
 	LPCSTR PciClass;
-	BOOL DisableSmart;
+	LPCSTR DiskPath;
+	LPCSTR NetGuid;
+	LPCSTR ProductPolicy;
+
+#define NW_NET_ACTIVE (1 << 0)
+#define NW_NET_PHYS   (1 << 1)
+#define NW_NET_IPV4   (1 << 2)
+#define NW_NET_IPV6   (1 << 3)
+#define NW_NET_ETH    (1 << 4)
+#define NW_NET_WLAN   (1 << 5)
+	UINT64 NetFlags;
+#define NW_DISK_NO_SMART (1 << 0)
+#define NW_DISK_PHYS     (1 << 1)
+#define NW_DISK_HD       (1 << 2)
+#define NW_DISK_CD       (1 << 3)
+#define NW_DISK_NVME     (1 << 11)
+#define NW_DISK_SATA     (1 << 12)
+#define NW_DISK_SCSI     (1 << 13)
+#define NW_DISK_SAS      (1 << 14)
+#define NW_DISK_USB      (1 << 15)
+	UINT64 DiskFlags;
+#define NW_UEFI_VARS     (1 << 0)
+#define NW_UEFI_MENU     (1 << 1)
+	UINT64 UefiFlags;
 
 	VOID (*SpdProgress) (LPCSTR lpszText);
 
@@ -69,6 +97,23 @@ typedef struct _NWLIB_CONTEXT
 
 	struct _CDI_SMART* NwSmart;
 	UINT64 NwSmartFlags;
+
+	BOOL EnablePdh;
+	HMODULE PdhDll;
+	PDH_STATUS(WINAPI* PdhOpenQueryW)(LPCWSTR, DWORD_PTR, PDH_HQUERY*);
+	PDH_STATUS(WINAPI* PdhAddCounterW)(PDH_HQUERY, LPCWSTR, DWORD_PTR, PDH_HCOUNTER*);
+	PDH_STATUS(WINAPI* PdhCollectQueryData)(PDH_HQUERY);
+	PDH_STATUS(WINAPI* PdhGetFormattedCounterValue)(PDH_HCOUNTER, DWORD, LPDWORD, PPDH_FMT_COUNTERVALUE);
+	PDH_STATUS(WINAPI* PdhGetFormattedCounterArrayW)(PDH_HCOUNTER, DWORD, LPDWORD, LPDWORD, PPDH_FMT_COUNTERVALUE_ITEM_W);
+	PDH_STATUS(WINAPI* PdhCloseQuery)(PDH_HQUERY);
+	PDH_HQUERY Pdh;
+	PDH_HCOUNTER PdhCpuUsage;
+	PDH_HCOUNTER PdhCpuFreq;
+	PDH_HCOUNTER PdhCpuBaseFreq;
+	PDH_HCOUNTER PdhNetRecv;
+	PDH_HCOUNTER PdhNetSend;
+	PDH_HCOUNTER PdhGpuUsage;
+	PDH_HCOUNTER PdhGpuCurMem;
 
 	struct wr0_drv_t* NwDrv;
 	UINT CodePage;
@@ -97,6 +142,11 @@ VOID NW_Export(PNODE node, FILE* file);
 VOID NW_Print(LPCSTR lpFileName);
 VOID NW_Fini(VOID);
 
+VOID NWL_PdhInit(VOID);
+VOID NWL_PdhUpdate(VOID);
+VOID NWL_PdhFini(VOID);
+PDH_FMT_COUNTERVALUE NWL_GetPdhSum(PDH_HCOUNTER counter, DWORD fmt, LPCWSTR suffix);
+
 noreturn VOID NWL_ErrExit(INT nExitCode, LPCSTR lpszText);
 
 PNODE NW_Acpi(VOID);
@@ -114,9 +164,15 @@ PNODE NW_Libinfo(VOID);
 PNODE NW_Uefi(VOID);
 PNODE NW_NetShare(VOID);
 PNODE NW_Audio(VOID);
+PNODE NW_PublicIp(VOID);
+PNODE NW_ProductPolicy(VOID);
+PNODE NW_Gpu(VOID);
+PNODE NW_Font(VOID);
 
 VOID NWL_GetUptime(CHAR* szUptime, DWORD dwSize);
 VOID NWL_GetHostname(CHAR* szHostname);
+
+#define NWL_STR_SIZE 64
 
 typedef struct _NWLIB_MEM_INFO
 {
@@ -134,9 +190,91 @@ typedef struct _NWLIB_MEM_INFO
 	DWORDLONG SfciAvail;
 	SIZE_T SystemCache;
 	SIZE_T PageSize;
+	CHAR StrPhysTotal[NWL_STR_SIZE];
+	CHAR StrPhysAvail[NWL_STR_SIZE];
+	CHAR StrPageTotal[NWL_STR_SIZE];
+	CHAR StrPageAvail[NWL_STR_SIZE];
+	CHAR StrSfciTotal[NWL_STR_SIZE];
+	CHAR StrSfciAvail[NWL_STR_SIZE];
 } NWLIB_MEM_INFO, *PNWLIB_MEM_INFO;
 
 VOID NWL_GetMemInfo(PNWLIB_MEM_INFO pMemInfo);
+
+double NWL_GetCpuUsage(VOID);
+DWORD NWL_GetCpuFreq(VOID);
+
+typedef struct _NWLIB_CPU_INFO
+{
+	CHAR MsrMulti[NWL_STR_SIZE];
+	int MsrTemp;
+	double MsrVolt;
+	double MsrBus;
+	int MsrEnergy;
+	double MsrPower;
+	double MsrPl1;
+	double MsrPl2;
+}NWLIB_CPU_INFO;
+VOID NWL_GetCpuMsr(int count, NWLIB_CPU_INFO* info);
+
+typedef struct _NWLIB_NET_TRAFFIC
+{
+	UINT64 Recv;
+	UINT64 Send;
+	CHAR StrRecv[NWL_STR_SIZE];
+	CHAR StrSend[NWL_STR_SIZE];
+} NWLIB_NET_TRAFFIC;
+VOID NWL_GetNetTraffic(NWLIB_NET_TRAFFIC* info, BOOL bit);
+
+PNODE NWL_EnumPci(PNODE pNode, LPCSTR pciClass);
+
+typedef struct _NWLIB_CUR_DISPLAY
+{
+	LONG Width;
+	LONG Height;
+	UINT Dpi;
+	UINT Scale;
+} NWLIB_CUR_DISPLAY;
+VOID NWL_GetCurDisplay(HWND wnd, NWLIB_CUR_DISPLAY* info);
+
+typedef struct _NWLIB_GPU_DEV
+{
+	BOOL driver;
+	CHAR gpu_if[NWL_STR_SIZE];
+	CHAR gpu_hwid[NWL_STR_SIZE];
+	CHAR gpu_device[NWL_STR_SIZE];
+	CHAR gpu_vendor[NWL_STR_SIZE];
+	CHAR gpu_driver_date[NWL_STR_SIZE];
+	CHAR gpu_driver_ver[NWL_STR_SIZE];
+	CHAR gpu_location[NWL_STR_SIZE];
+	UINT64 gpu_mem_size;
+} NWLIB_GPU_DEV;
+
+#define NWL_GPU_MAX_COUNT 8
+
+typedef struct _NWLIB_GPU_INFO
+{
+	int DeviceCount;
+	NWLIB_GPU_DEV Device[NWL_GPU_MAX_COUNT];
+	double Usage3D;
+	double UsageCopy;
+	double UsageCompute0;
+	double UsageCompute1;
+#if 0
+	double UsageHighPriority3D;
+	double UsageHighPriorityCompute;
+	double UsageTrueAudio0;
+	double UsageTrueAudio1;
+	double UsageVideoCodec0;
+	double UsageVideoJPEG;
+	double UsageTimer0;
+	double UsageSecurity1;
+#endif
+	double UsageDedicated;
+	UINT64 DedicatedTotal;
+	UINT64 DedicatedInUse;
+} NWLIB_GPU_INFO, * PNWLIB_GPU_INFO;
+
+VOID NWL_GetGpuInfo(PNWLIB_GPU_INFO info);
 
 #define NWL_Debugf(...) \
 	do \
